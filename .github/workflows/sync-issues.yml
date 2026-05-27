@@ -22,7 +22,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 22+: native WebSocket support, which @supabase/supabase-js
+          # initializes at client construction (Realtime). Node 20 fails here.
+          node-version: '22'
 
       - name: Install deps
         working-directory: vt-flex-issues-dashboard/scripts
