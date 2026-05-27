@@ -1,0 +1,38 @@
+name: Sync VT Flex Issues
+
+on:
+  schedule:
+    # Every 15 minutes. Adjust to your needs.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:    # Allow manual runs from the Actions tab
+
+concurrency:
+  group: vt-flex-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        working-directory: vt-flex-issues-dashboard/scripts
+        run: npm ci || npm install
+
+      - name: Run sync
+        working-directory: vt-flex-issues-dashboard/scripts
+        env:
+          VT_FLEX_BEARER_TOKEN:         ${{ secrets.VT_FLEX_BEARER_TOKEN }}
+          SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:    ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VT_FLEX_ISSUE_TYPE:           technical_issue
+        run: node sync-issues.mjs

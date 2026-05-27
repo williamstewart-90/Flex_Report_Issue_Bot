@@ -1,0 +1,17 @@
+{
+  "name": "vt-flex-sync",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sync VT Flex issues to Supabase",
+  "main": "sync-issues.mjs",
+  "scripts": {
+    "sync": "node sync-issues.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

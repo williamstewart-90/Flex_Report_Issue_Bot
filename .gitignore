@@ -1,0 +1,24 @@
+.DS_Store
+*.log
+
+# Stray lockfile left over from accidental npm in the wrong cwd
+/package-lock.json
+
+# Defense in depth: nested gitignore in vt-flex-issues-dashboard/
+# already excludes these, but make doubly sure secrets never sneak in.
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Node modules anywhere in the tree
+**/node_modules
+
+# Build artifacts
+**/dist
+**/.vite
+**/.netlify
+
+# Generated logs from local dry-runs
+**/dryrun.log
+**/mock-dryrun.log
+**/firstwrite.log

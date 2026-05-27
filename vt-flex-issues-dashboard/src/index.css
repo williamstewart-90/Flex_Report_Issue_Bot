@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background-color: theme(colors.paper);
+    color: theme(colors.ink);
+    font-family: theme(fontFamily.sans);
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(rgba(10,10,10,0.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-paper border border-ink/15 rounded-none;
+  }
+  .label-tag {
+    @apply font-mono text-[10px] tracking-[0.18em] uppercase text-ink/60;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono border border-ink/20 bg-bone/40;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center px-3 py-1.5 text-xs font-mono uppercase tracking-wider
+           border border-ink bg-paper hover:bg-ink hover:text-paper transition-colors;
+  }
+  .field {
+    @apply w-full px-3 py-2 text-sm font-mono bg-paper border border-ink/20
+           focus:outline-none focus:border-ink;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(10,10,10,0.2); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: rgba(10,10,10,0.35); }
