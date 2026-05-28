@@ -156,7 +156,6 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
 
   const teams    = useMemo(() => unique(issues.map((i) => i.team_name)), [issues]);
   const agents   = useMemo(() => unique(issues.map((i) => i.agent_name)), [issues]);
-  const statuses = useMemo(() => unique(issues.map((i) => i.status)), [issues]);
 
   return (
     <main className="max-w-[1600px] mx-auto px-6 lg:px-10 pb-20">
@@ -191,7 +190,6 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
           setFilters={setFilters}
           teams={teams}
           agents={agents}
-          statuses={statuses}
         />
 
         {error && (
