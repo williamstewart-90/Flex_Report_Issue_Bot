@@ -14,7 +14,9 @@
 //   SUPABASE_URL               - https://<project>.supabase.co
 //   SUPABASE_SERVICE_ROLE_KEY  - sb_secret_... (service role; bypasses RLS)
 // Optional:
-//   SYSTEM_PROMPT              - falls back to a one-liner if absent
+//   SYSTEM_PROMPT              - overrides ./lib/system-prompt.js without redeploy.
+//                                Netlify caps env vars at ~4 KB, so the full prompt
+//                                lives in code; this var is a quick escape hatch.
 //   CHAT_RATE_LIMIT_PER_HOUR   - default 30
 //   ANTHROPIC_MODEL            - default claude-sonnet-4-20250514
 //   ANTHROPIC_MAX_TOKENS       - default 1000
@@ -22,7 +24,10 @@
 //                                rotates between asymmetric algs (e.g. "ES256,RS256")
 
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { SYSTEM_PROMPT as FILE_SYSTEM_PROMPT } from './lib/system-prompt.js';
 
+// Safety net only — never used in normal operation. lib/system-prompt.js
+// is always present in the bundle, so the real prompt is always available.
 const SYSTEM_PROMPT_DEFAULT = 'You are the Flex Troubleshooting Assistant.';
 const ANTHROPIC_URL         = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION     = '2023-06-01';
@@ -172,7 +177,7 @@ export const handler = async (event) => {
       body: JSON.stringify({
         model:      MODEL,
         max_tokens: MAX_TOKENS,
-        system:     SYSTEM_PROMPT || SYSTEM_PROMPT_DEFAULT,
+        system:     SYSTEM_PROMPT || FILE_SYSTEM_PROMPT || SYSTEM_PROMPT_DEFAULT,
         messages,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }]
       })
