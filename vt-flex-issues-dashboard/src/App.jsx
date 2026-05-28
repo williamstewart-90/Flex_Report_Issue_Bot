@@ -15,9 +15,17 @@ const TABS = [
 ];
 
 export default function App({ session }) {
-  const [activeTab, setActiveTab] = useState('reports');
-  const [lastSync, setLastSync]   = useState(null);
-  const [refreshFn, setRefreshFn] = useState(() => () => {});
+  const [activeTab, setActiveTab]         = useState('reports');
+  const [lastSync, setLastSync]           = useState(null);
+  const [refreshFn, setRefreshFn]         = useState(() => () => {});
+  const [chatbotPrefill, setChatbotPrefill] = useState(null);
+
+  // Called from the Issue drawer's "Copy for Help Bot" button.
+  // Prefills the chatbot composer, flips to the Help Bot tab.
+  function sendToHelpBot(text) {
+    setChatbotPrefill(text);
+    setActiveTab('helpbot');
+  }
 
   return (
     <div className="min-h-screen">
@@ -39,10 +47,15 @@ export default function App({ session }) {
           session={session}
           onLastSyncChange={setLastSync}
           onLoadReady={setRefreshFn}
+          onSendToHelpBot={sendToHelpBot}
         />
       </div>
       <div className={activeTab === 'helpbot' ? 'block' : 'hidden'}>
-        <FlexChatbot session={session} />
+        <FlexChatbot
+          session={session}
+          prefillText={chatbotPrefill}
+          onPrefillConsumed={() => setChatbotPrefill(null)}
+        />
       </div>
     </div>
   );
@@ -76,7 +89,7 @@ function TabBar({ tabs, active, onChange }) {
   );
 }
 
-function Dashboard({ session, onLastSyncChange, onLoadReady }) {
+function Dashboard({ session, onLastSyncChange, onLoadReady, onSendToHelpBot }) {
   const [issues, setIssues]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
@@ -217,6 +230,10 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
         <IssueDetail
           issueRow={selected}
           onClose={() => setSelected(null)}
+          onSendToHelpBot={(text) => {
+            onSendToHelpBot?.(text);
+            setSelected(null);
+          }}
         />
       )}
     </main>

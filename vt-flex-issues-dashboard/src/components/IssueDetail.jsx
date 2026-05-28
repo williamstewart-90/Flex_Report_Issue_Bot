@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { supabase } from '../lib/supabase.js';
 
-export default function IssueDetail({ issueRow, onClose }) {
+export default function IssueDetail({ issueRow, onClose, onSendToHelpBot }) {
   const [supervisors, setSupervisors] = useState([]);
   const [tasks,       setTasks]       = useState([]);
   const [history,     setHistory]     = useState([]);
   const [queues,      setQueues]      = useState([]);
   const [skills,      setSkills]      = useState([]);
   const [loading,     setLoading]     = useState(true);
+  const [copied,      setCopied]      = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,16 +34,88 @@ export default function IssueDetail({ issueRow, onClose }) {
     return () => { cancelled = true; };
   }, [issueRow.issue_id]);
 
+  // Build the message the Help Bot will receive. We use raw_payload (the
+  // original upstream JSON the sync script stored), so the bot sees the
+  // exact shape its system prompt's "H. Analyzing a Flex Issue Report"
+  // section was designed for — no flattening or translation.
+  function buildHelpBotMessage() {
+    const payload = issueRow.raw_payload ?? {
+      // Defensive fallback if raw_payload is somehow missing (older rows
+      // from before raw_payload was wired, or if it was nulled). The
+      // assistant gets less rich data but can still triage.
+      issue: issueRow,
+      recent_tasks: tasks,
+      supervisors,
+      status_history: history,
+      worker_queues: queues,
+      worker_skills: skills
+    };
+    const prefix = `Please analyze this Flex issue report and give me the manager next steps:\n\n`;
+    return prefix + '```json\n' + JSON.stringify(payload, null, 2) + '\n```';
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through to legacy path
+    }
+    // Legacy fallback (non-HTTPS or older browsers)
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleSendToHelpBot() {
+    const message = buildHelpBotMessage();
+    const ok = await copyToClipboard(message);
+    if (!ok) {
+      // eslint-disable-next-line no-alert
+      alert('Copy failed. Switching to Help Bot — you may need to paste manually.');
+    }
+    setCopied(true);
+    // Give the manager a beat to see the confirmation before the tab swap
+    // hides this drawer.
+    setTimeout(() => {
+      onSendToHelpBot?.(message);
+    }, 350);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-ink/50" onClick={onClose} />
       <aside className="w-full max-w-[920px] h-full bg-paper border-l-2 border-ink overflow-y-auto">
-        <div className="sticky top-0 bg-paper border-b border-ink/15 px-6 py-4 flex items-baseline justify-between">
+        <div className="sticky top-0 bg-paper border-b border-ink/15 px-6 py-4 flex items-baseline justify-between gap-3">
           <div>
             <div className="label-tag">Issue</div>
             <div className="font-mono text-xs mt-0.5">{issueRow.issue_id}</div>
           </div>
-          <button className="btn" onClick={onClose}>Close</button>
+          <div className="flex items-center gap-2">
+            {onSendToHelpBot && (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleSendToHelpBot}
+                disabled={copied}
+              >
+                {copied ? '✓ Copied' : '↗ Copy for Help Bot'}
+              </button>
+            )}
+            <button className="btn" onClick={onClose}>Close</button>
+          </div>
         </div>
 
         <div className="px-6 py-6 space-y-8">

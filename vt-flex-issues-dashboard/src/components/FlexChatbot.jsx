@@ -8,18 +8,38 @@ const QUICK_TOPICS = [
   { icon: '💰', label: 'Quote Greyed Out',   prompt: 'A quote button is greyed out for one of my agents. What permissions, plan states, or workflow checks should I verify?' }
 ];
 
-export default function FlexChatbot({ session }) {
+export default function FlexChatbot({ session, prefillText, onPrefillConsumed }) {
   const [messages, setMessages] = useState([]); // [{ role: 'user'|'assistant', content: string }]
   const [input, setInput]       = useState('');
   const [sending, setSending]   = useState(false);
   const [error, setError]       = useState(null);
-  const scrollRef = useRef(null);
+  const scrollRef     = useRef(null);
+  const composerRef   = useRef(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, sending]);
+
+  // Consume a prefill (e.g. from "Copy for Help Bot" in the issue drawer):
+  // drop it into the composer, scroll/focus it, then clear so it doesn't
+  // re-fire if the user edits or sends.
+  useEffect(() => {
+    if (prefillText) {
+      setInput(prefillText);
+      onPrefillConsumed?.();
+      // Focus + move cursor to end so manager can hit Enter immediately
+      // or add a clarifying note before sending.
+      setTimeout(() => {
+        if (composerRef.current) {
+          composerRef.current.focus();
+          composerRef.current.setSelectionRange(prefillText.length, prefillText.length);
+        }
+      }, 50);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillText]);
 
   function newChat() {
     setMessages([]);
@@ -121,6 +141,7 @@ export default function FlexChatbot({ session }) {
         <div className="border-t border-ink/15 p-4 bg-paper">
           <div className="flex gap-3 items-stretch">
             <textarea
+              ref={composerRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onComposerKeyDown}
