@@ -27,7 +27,7 @@ export default function IssuesTable({ rows, loading, onSelect }) {
             <Th>Status</Th>
             <Th>Description</Th>
             <Th>Timezone</Th>
-            <Th>Plugin</Th>
+            <Th>Task SID</Th>
             <Th />
           </tr>
         </thead>
@@ -55,7 +55,15 @@ export default function IssuesTable({ rows, loading, onSelect }) {
                 <div className="line-clamp-2 text-[13px]">{r.agent_description || <span className="text-ink/40">—</span>}</div>
               </Td>
               <Td className="font-mono text-[11px]">{r.hw_timezone || '—'}</Td>
-              <Td className="font-mono text-[11px]">{r.plugin_version || '—'}</Td>
+              <Td className="font-mono text-[11px] whitespace-nowrap">
+                {r.most_recent_task_sid ? (
+                  <span title={r.most_recent_task_sid}>
+                    …{r.most_recent_task_sid.slice(-8)}
+                  </span>
+                ) : (
+                  '—'
+                )}
+              </Td>
               <Td>
                 <span className="font-mono text-[10px] text-rust">view →</span>
               </Td>

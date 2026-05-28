@@ -94,14 +94,23 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
     setLoading(true); setError(null);
     try {
       const since = new Date(Date.now() - filters.rangeDays * 86400_000).toISOString();
+      // Embed the most recent task per issue (lowest task_order = most recent
+      // per upstream API convention). PostgREST returns it as a sub-array;
+      // we flatten to a scalar `most_recent_task_sid` for the table view.
       const { data, error: err } = await supabase
         .from('vt_flex_issues')
-        .select('*')
+        .select('*, most_recent_task:vt_flex_recent_tasks(task_sid)')
         .gte('issue_created_at', since)
         .order('issue_created_at', { ascending: false })
+        .order('task_order', { foreignTable: 'vt_flex_recent_tasks', ascending: true })
+        .limit(1, { foreignTable: 'vt_flex_recent_tasks' })
         .limit(1000);
       if (err) throw err;
-      setIssues(data || []);
+      const normalized = (data || []).map((row) => ({
+        ...row,
+        most_recent_task_sid: row.most_recent_task?.[0]?.task_sid || null
+      }));
+      setIssues(normalized);
 
       const { data: runs } = await supabase
         .from('vt_flex_sync_runs')
@@ -139,7 +148,7 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
       if (!q) return true;
       const hay = [
         i.agent_name, i.team_name, i.agent_description,
-        i.worker_email, i.issue_id, i.hw_timezone, i.plugin_version
+        i.worker_email, i.issue_id, i.hw_timezone, i.most_recent_task_sid
       ].filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
