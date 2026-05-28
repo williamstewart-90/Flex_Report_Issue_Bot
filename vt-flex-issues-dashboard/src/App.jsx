@@ -183,6 +183,14 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
           <h2 className="font-display text-3xl">
             Issues <span className="font-sans text-base text-ink/50 ml-2">{filtered.length}</span>
           </h2>
+          <button
+            type="button"
+            onClick={() => downloadIssuesCsv(filtered)}
+            disabled={filtered.length === 0}
+            className="btn disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ↓ Download CSV
+          </button>
         </div>
 
         <FilterBar
@@ -217,4 +225,42 @@ function Dashboard({ session, onLastSyncChange, onLoadReady }) {
 
 function unique(arr) {
   return [...new Set(arr.filter(Boolean))].sort();
+}
+
+// ---------- CSV export ----------
+// RFC 4180-ish: wrap every field in double quotes and escape embedded quotes.
+// Always-quoting is simpler than conditional and Excel parses it correctly.
+function csvEscape(v) {
+  const s = v == null ? '' : String(v);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function buildIssuesCsv(rows) {
+  const headers = ['Agent Name', 'Description', 'Task SID'];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const r of rows) {
+    lines.push([
+      csvEscape(r.agent_name),
+      csvEscape(r.agent_description),
+      csvEscape(r.most_recent_task_sid)
+    ].join(','));
+  }
+  // CRLF line endings per RFC 4180 — Excel and Sheets both prefer this.
+  return lines.join('\r\n');
+}
+
+function downloadIssuesCsv(rows) {
+  const csv = buildIssuesCsv(rows);
+  // Prepend UTF-8 BOM so Excel renders unicode (em-dashes, accents, emoji)
+  // correctly without manual import wizardry.
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `vt-flex-issues-${ts}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
