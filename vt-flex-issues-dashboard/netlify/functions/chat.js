@@ -5,22 +5,40 @@
 // Anthropic Messages API (Claude Sonnet 4 + web_search tool), and returns
 // the concatenated text content.
 //
+// JWT verification uses ES256 + Supabase's asymmetric JWKS endpoint
+// (.well-known/jwks.json). No shared secret needed; key rotation handled
+// automatically by jose's createRemoteJWKSet.
+//
 // Required env vars (set in Netlify Site configuration → Environment vars):
 //   ANTHROPIC_API_KEY          - sk-ant-...
 //   SUPABASE_URL               - https://<project>.supabase.co
 //   SUPABASE_SERVICE_ROLE_KEY  - sb_secret_... (service role; bypasses RLS)
-//   SUPABASE_JWT_SECRET        - JWT signing secret (Supabase → Settings → API → JWT)
 // Optional:
 //   SYSTEM_PROMPT              - falls back to a one-liner if absent
 //   CHAT_RATE_LIMIT_PER_HOUR   - default 30
 //   ANTHROPIC_MODEL            - default claude-sonnet-4-20250514
 //   ANTHROPIC_MAX_TOKENS       - default 1000
+//   SUPABASE_JWT_ALGS          - default "ES256"; comma-list if Supabase
+//                                rotates between asymmetric algs (e.g. "ES256,RS256")
 
-import { jwtVerify } from 'jose';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 
 const SYSTEM_PROMPT_DEFAULT = 'You are the Flex Troubleshooting Assistant.';
 const ANTHROPIC_URL         = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION     = '2023-06-01';
+
+// Memoized JWKS resolver. Survives across warm Lambda invocations so we
+// don't refetch on every request; jose handles internal HTTP caching and
+// key rotation per spec.
+let _jwks;
+function getJwks(supabaseUrl) {
+  if (!_jwks) {
+    _jwks = createRemoteJWKSet(
+      new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`)
+    );
+  }
+  return _jwks;
+}
 
 const cors = {
   'Access-Control-Allow-Origin':  '*',
@@ -49,7 +67,6 @@ export const handler = async (event) => {
     ANTHROPIC_API_KEY,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
-    SUPABASE_JWT_SECRET,
     SYSTEM_PROMPT
   } = process.env;
 
@@ -57,7 +74,6 @@ export const handler = async (event) => {
   if (!ANTHROPIC_API_KEY)         missing.push('ANTHROPIC_API_KEY');
   if (!SUPABASE_URL)              missing.push('SUPABASE_URL');
   if (!SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!SUPABASE_JWT_SECRET)       missing.push('SUPABASE_JWT_SECRET');
   if (missing.length) {
     return json(500, { error: `Server misconfigured: missing ${missing.join(', ')}` });
   }
@@ -65,6 +81,8 @@ export const handler = async (event) => {
   const RATE_LIMIT = parseInt(process.env.CHAT_RATE_LIMIT_PER_HOUR || '30', 10);
   const MODEL      = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
   const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '1000', 10);
+  const JWT_ALGS   = (process.env.SUPABASE_JWT_ALGS || 'ES256')
+    .split(',').map((s) => s.trim()).filter(Boolean);
 
   // ---------- 2. Verify Supabase JWT ----------
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
@@ -75,9 +93,8 @@ export const handler = async (event) => {
 
   let userEmail;
   try {
-    const secret = new TextEncoder().encode(SUPABASE_JWT_SECRET);
-    const { payload } = await jwtVerify(token, secret, {
-      algorithms: ['HS256'],
+    const { payload } = await jwtVerify(token, getJwks(SUPABASE_URL), {
+      algorithms: JWT_ALGS,
       audience:   'authenticated'
     });
     userEmail = String(payload.email || '').toLowerCase().trim();
