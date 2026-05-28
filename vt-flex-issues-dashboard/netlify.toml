@@ -4,6 +4,12 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Tell Netlify's secret scanner which env-var NAMES are intentionally public.
+  # VITE_* vars are baked into the browser bundle by design.
+  # SUPABASE_URL is the project URL (not a secret; the service-role key IS).
+  # Real secrets (ANTHROPIC_API_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET,
+  # SYSTEM_PROMPT) are intentionally NOT listed here so the scanner keeps watching them.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,SUPABASE_URL"
 
 # Serverless functions live in netlify/functions (sibling of src/)
 [functions]
