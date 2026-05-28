@@ -7,13 +7,80 @@ import IssuesTable from './components/IssuesTable.jsx';
 import IssueDetail from './components/IssueDetail.jsx';
 import IssuesByTeamChart from './components/IssuesByTeamChart.jsx';
 import IssuesOverTimeChart from './components/IssuesOverTimeChart.jsx';
+import FlexChatbot from './components/FlexChatbot.jsx';
+
+const TABS = [
+  { id: 'reports',  label: 'Issue Reports', icon: '📋' },
+  { id: 'helpbot',  label: 'Help Bot',      icon: '🛠️' }
+];
 
 export default function App({ session }) {
-  const [issues, setIssues]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
+  const [activeTab, setActiveTab] = useState('reports');
+  const [lastSync, setLastSync]   = useState(null);
+  const [refreshFn, setRefreshFn] = useState(() => () => {});
+
+  return (
+    <div className="min-h-screen">
+      <Header
+        lastSync={activeTab === 'reports' ? lastSync : null}
+        onRefresh={activeTab === 'reports' ? refreshFn : null}
+        session={session}
+      />
+
+      <TabBar
+        tabs={TABS}
+        active={activeTab}
+        onChange={setActiveTab}
+      />
+
+      {/* Both panels stay mounted; toggle visibility so chat history survives switches */}
+      <div className={activeTab === 'reports' ? 'block' : 'hidden'}>
+        <Dashboard
+          session={session}
+          onLastSyncChange={setLastSync}
+          onLoadReady={setRefreshFn}
+        />
+      </div>
+      <div className={activeTab === 'helpbot' ? 'block' : 'hidden'}>
+        <FlexChatbot session={session} />
+      </div>
+    </div>
+  );
+}
+
+function TabBar({ tabs, active, onChange }) {
+  return (
+    <nav className="border-b border-ink/15 bg-paper/60 backdrop-blur sticky top-[88px] z-[5]">
+      <div className="max-w-[1600px] mx-auto px-6 lg:px-10 flex items-stretch">
+        {tabs.map((t) => {
+          const isActive = active === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onChange(t.id)}
+              className={
+                'px-5 py-3 font-mono text-xs uppercase tracking-[0.18em] border-b-2 transition-colors ' +
+                (isActive
+                  ? 'border-rust text-ink'
+                  : 'border-transparent text-ink/45 hover:text-ink/70')
+              }
+            >
+              <span className="mr-2">{t.icon}</span>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function Dashboard({ session, onLastSyncChange, onLoadReady }) {
+  const [issues, setIssues]     = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
   const [selected, setSelected] = useState(null);
-  const [lastSync, setLastSync] = useState(null);
 
   const [filters, setFilters] = useState({
     search:    '',
@@ -41,13 +108,25 @@ export default function App({ session }) {
         .select('completed_at, status')
         .order('completed_at', { ascending: false })
         .limit(1);
-      if (runs && runs[0]) setLastSync(runs[0]);
+      if (runs && runs[0]) {
+        setLastSync(runs[0]);
+      }
     } catch (e) {
       setError(e.message || String(e));
     } finally {
       setLoading(false);
     }
   }
+
+  function setLastSync(run) {
+    onLastSyncChange?.(run);
+  }
+
+  // Expose `load` to the App-level Header so its Refresh button works.
+  useEffect(() => {
+    onLoadReady?.(() => load);
+    /* eslint-disable-next-line */
+  }, []);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters.rangeDays]);
 
@@ -66,62 +145,58 @@ export default function App({ session }) {
     });
   }, [issues, filters]);
 
-  const teams   = useMemo(() => unique(issues.map((i) => i.team_name)), [issues]);
-  const agents  = useMemo(() => unique(issues.map((i) => i.agent_name)), [issues]);
+  const teams    = useMemo(() => unique(issues.map((i) => i.team_name)), [issues]);
+  const agents   = useMemo(() => unique(issues.map((i) => i.agent_name)), [issues]);
   const statuses = useMemo(() => unique(issues.map((i) => i.status)), [issues]);
 
   return (
-    <div className="min-h-screen">
-      <Header lastSync={lastSync} onRefresh={load} session={session} />
+    <main className="max-w-[1600px] mx-auto px-6 lg:px-10 pb-20">
+      <StatsBar issues={filtered} loading={loading} />
 
-      <main className="max-w-[1600px] mx-auto px-6 lg:px-10 pb-20">
-        <StatsBar issues={filtered} loading={loading} />
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-8">
-          <div className="xl:col-span-2 card p-5">
-            <div className="flex items-baseline justify-between mb-4">
-              <h2 className="font-display text-2xl">Issues over time</h2>
-              <span className="label-tag">last {filters.rangeDays} days</span>
-            </div>
-            <IssuesOverTimeChart issues={filtered} days={filters.rangeDays} />
-          </div>
-          <div className="card p-5">
-            <div className="flex items-baseline justify-between mb-4">
-              <h2 className="font-display text-2xl">By team</h2>
-              <span className="label-tag">top 10</span>
-            </div>
-            <IssuesByTeamChart issues={filtered} />
-          </div>
-        </div>
-
-        <div className="mt-10">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-8">
+        <div className="xl:col-span-2 card p-5">
           <div className="flex items-baseline justify-between mb-4">
-            <h2 className="font-display text-3xl">
-              Issues <span className="font-sans text-base text-ink/50 ml-2">{filtered.length}</span>
-            </h2>
+            <h2 className="font-display text-2xl">Issues over time</h2>
+            <span className="label-tag">last {filters.rangeDays} days</span>
           </div>
-
-          <FilterBar
-            filters={filters}
-            setFilters={setFilters}
-            teams={teams}
-            agents={agents}
-            statuses={statuses}
-          />
-
-          {error && (
-            <div className="mt-4 p-4 border-2 border-ember bg-ember/10 font-mono text-sm">
-              <strong>Error:</strong> {error}
-            </div>
-          )}
-
-          <IssuesTable
-            rows={filtered}
-            loading={loading}
-            onSelect={setSelected}
-          />
+          <IssuesOverTimeChart issues={filtered} days={filters.rangeDays} />
         </div>
-      </main>
+        <div className="card p-5">
+          <div className="flex items-baseline justify-between mb-4">
+            <h2 className="font-display text-2xl">By team</h2>
+            <span className="label-tag">top 10</span>
+          </div>
+          <IssuesByTeamChart issues={filtered} />
+        </div>
+      </div>
+
+      <div className="mt-10">
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="font-display text-3xl">
+            Issues <span className="font-sans text-base text-ink/50 ml-2">{filtered.length}</span>
+          </h2>
+        </div>
+
+        <FilterBar
+          filters={filters}
+          setFilters={setFilters}
+          teams={teams}
+          agents={agents}
+          statuses={statuses}
+        />
+
+        {error && (
+          <div className="mt-4 p-4 border-2 border-ember bg-ember/10 font-mono text-sm">
+            <strong>Error:</strong> {error}
+          </div>
+        )}
+
+        <IssuesTable
+          rows={filtered}
+          loading={loading}
+          onSelect={setSelected}
+        />
+      </div>
 
       {selected && (
         <IssueDetail
@@ -129,7 +204,7 @@ export default function App({ session }) {
           onClose={() => setSelected(null)}
         />
       )}
-    </div>
+    </main>
   );
 }
 

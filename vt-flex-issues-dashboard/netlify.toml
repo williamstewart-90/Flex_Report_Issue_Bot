@@ -5,7 +5,18 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# SPA redirect — all routes serve index.html
+# Serverless functions live in netlify/functions (sibling of src/)
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Allow the chat function up to 26 s for Anthropic responses
+# (default is 10 s; the Pro plan ceiling is 26 s).
+[functions."chat"]
+  timeout = 26
+
+# SPA redirect — all non-function routes serve index.html
+# /.netlify/functions/* is handled by Netlify before this rule.
 [[redirects]]
   from   = "/*"
   to     = "/index.html"

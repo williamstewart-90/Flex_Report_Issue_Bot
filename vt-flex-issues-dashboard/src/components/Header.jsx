@@ -31,7 +31,9 @@ export default function Header({ lastSync, onRefresh, session }) {
               </div>
             </div>
           )}
-          <button onClick={onRefresh} className="btn">Refresh</button>
+          {onRefresh && (
+            <button onClick={onRefresh} className="btn">Refresh</button>
+          )}
           {email && (
             <div className="text-right">
               <div className="label-tag">signed in</div>
