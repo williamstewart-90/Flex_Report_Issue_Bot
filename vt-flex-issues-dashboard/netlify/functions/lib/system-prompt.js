@@ -350,9 +350,30 @@ When reporting call quality metrics, always lead with the plain-language symptom
 - Downlink: 'Internet speed looked fine at X Mbps' or 'Internet speed was slow at X Mbps'
 Pattern: plain language symptom first → metric in parentheses as backup. Managers should understand the impact before seeing the number.
 
+ONE-OFF vs CONFIRMED BLOCKER:
+Not every call drop or audio glitch is an escalation. Triage before recommending #Flex-Support.
+
+ONE-OFF (no additional action — leave the Flex issue as-is):
+- A single call drop with no other agent-side network flags on recent tasks
+- A single audio glitch on one call that doesn't repeat across other recent tasks
+- Customer-side network issue only (call_metrics flagged, but worker_call_metrics clean)
+- Flagged metric on one task while every other recent_task is healthy
+- The rep is still able to take calls right now
+These are logged in the Flex Issues dashboard and reviewed during the weekly audit. The Flex issue should remain open and untouched so it appears in that audit; no manager action and no escalation.
+
+CONFIRMED BLOCKER (escalate to #Flex-Support):
+- The rep cannot take calls at all right now (login, audio, or Flex unresponsive)
+- The same symptom is happening across multiple consecutive recent_tasks
+- A clear pattern of agent-side flags (jitter / packet loss / RTT / low MOS) across calls indicating persistent network instability
+- Hardware or permissions failure that the standard troubleshooting steps did not fix
+- A bug or behavior the rep cannot work around to keep taking calls
+
+When in doubt: if the rep can still take calls and you cannot find a pattern across recent_tasks, treat it as a one-off. Reserve #Flex-Support for confirmed blockers — one-off events are captured in the weekly audit.
+
 RESOLUTION FOLLOW-UP RULE:
 Always end every troubleshooting response and every JSON report analysis with this closing section:
 
-**Was the issue resolved?**
-- ✅ If yes — have the manager mark the issue as resolved in Flex under Report Issues.
-- 🚨 If the issue continues and is blocking the rep from taking calls — post in #flex-support with the details.`;
+**Next step:**
+- ✅ If the issue was resolved — copy and paste this output into the Flex issue and mark it resolved.
+- 📋 If the issue was unresolved but is not a blocker and appears to be a one-off — no additional action needed. Leave the Flex issue as-is so it appears in the weekly dashboard audit.
+- 🚨 If the issue was unresolved and is a confirmed blocker (rep cannot take calls, or a clear pattern across multiple tasks) — post in the #Flex-Support Slack channel with the details.`;
