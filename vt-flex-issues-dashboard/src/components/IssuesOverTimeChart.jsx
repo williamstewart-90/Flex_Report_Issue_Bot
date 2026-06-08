@@ -1,13 +1,19 @@
 import { useMemo } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { format, startOfDay, addDays } from 'date-fns';
+import { format, startOfDay, addDays, differenceInCalendarDays } from 'date-fns';
 
-export default function IssuesOverTimeChart({ issues, days }) {
+// Builds one bucket per day from startDate to endDate (inclusive). Anchoring
+// on startDate (rather than "today minus N") lets custom historical ranges
+// that don't end today render correctly.
+export default function IssuesOverTimeChart({ issues, startDate, endDate }) {
   const data = useMemo(() => {
-    const today = startOfDay(new Date());
+    if (!startDate || !endDate) return [];
+    const start = startOfDay(startDate);
+    const end   = startOfDay(endDate);
+    const days  = Math.max(1, differenceInCalendarDays(end, start) + 1);
     const buckets = new Map();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = addDays(today, -i);
+    for (let i = 0; i < days; i++) {
+      const d = addDays(start, i);
       buckets.set(d.toISOString(), { date: d, count: 0, label: format(d, 'MMM d') });
     }
     for (const i of issues) {
@@ -16,7 +22,7 @@ export default function IssuesOverTimeChart({ issues, days }) {
       if (buckets.has(k)) buckets.get(k).count += 1;
     }
     return Array.from(buckets.values());
-  }, [issues, days]);
+  }, [issues, startDate, endDate]);
 
   return (
     <div className="h-64">

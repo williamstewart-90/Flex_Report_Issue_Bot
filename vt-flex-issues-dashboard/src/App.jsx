@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { format, startOfDay, addDays } from 'date-fns';
 import { supabase } from './lib/supabase.js';
 import Header from './components/Header.jsx';
 import StatsBar from './components/StatsBar.jsx';
@@ -96,24 +97,62 @@ function Dashboard({ session, onLastSyncChange, onLoadReady, onSendToHelpBot }) 
   const [selected, setSelected] = useState(null);
 
   const [filters, setFilters] = useState({
-    search:    '',
-    team:      'all',
-    status:    'all',
-    agent:     'all',
-    rangeDays: 7
+    search:     '',
+    team:       'all',
+    status:     'all',
+    agent:      'all',
+    rangeDays:  7,    // number (preset) or 'custom'
+    rangeStart: null, // 'YYYY-MM-DD' — only consulted when rangeDays === 'custom'
+    rangeEnd:   null  // 'YYYY-MM-DD' — inclusive end day
   });
+
+  // Resolve the active window into Date objects used by the chart, the
+  // Supabase query, and the "last N days" label. Returns nulls when custom
+  // mode is selected but dates haven't been filled in yet (callers guard).
+  const range = useMemo(() => {
+    if (filters.rangeDays === 'custom') {
+      if (!filters.rangeStart || !filters.rangeEnd) {
+        return { startDate: null, endDate: null, label: 'custom range' };
+      }
+      const startDate = new Date(filters.rangeStart + 'T00:00:00');
+      const endDate   = new Date(filters.rangeEnd   + 'T00:00:00');
+      return {
+        startDate,
+        endDate,
+        label: `${format(startDate, 'MMM d')} – ${format(endDate, 'MMM d, yyyy')}`
+      };
+    }
+    const n = typeof filters.rangeDays === 'number' ? filters.rangeDays : 7;
+    const today = startOfDay(new Date());
+    return {
+      startDate: addDays(today, -(n - 1)),
+      endDate:   today,
+      label:     `last ${n} days`
+    };
+  }, [filters.rangeDays, filters.rangeStart, filters.rangeEnd]);
 
   async function load() {
     setLoading(true); setError(null);
     try {
-      const since = new Date(Date.now() - filters.rangeDays * 86400_000).toISOString();
+      // Build the window. Preset always has a startDate; custom may not yet
+      // (user is still picking dates), in which case skip the load — they'll
+      // hit it again once both inputs are filled.
+      if (!range.startDate) { setLoading(false); return; }
+      const sinceISO = range.startDate.toISOString();
+      // For end: add 1 day to make the "To" date inclusive of its full 24h.
+      // Presets end at end-of-today, so no upper bound is needed.
+      const isCustom = filters.rangeDays === 'custom';
+      const untilISO = isCustom ? addDays(range.endDate, 1).toISOString() : null;
+
       // Embed the most recent task per issue (lowest task_order = most recent
       // per upstream API convention). PostgREST returns it as a sub-array;
       // we flatten to a scalar `most_recent_task_sid` for the table view.
-      const { data, error: err } = await supabase
+      let query = supabase
         .from('vt_flex_issues')
         .select('*, most_recent_task:vt_flex_recent_tasks(task_sid)')
-        .gte('issue_created_at', since)
+        .gte('issue_created_at', sinceISO);
+      if (untilISO) query = query.lt('issue_created_at', untilISO);
+      const { data, error: err } = await query
         .order('issue_created_at', { ascending: false })
         .order('task_order', { foreignTable: 'vt_flex_recent_tasks', ascending: true })
         .limit(1, { foreignTable: 'vt_flex_recent_tasks' })
@@ -150,7 +189,11 @@ function Dashboard({ session, onLastSyncChange, onLoadReady, onSendToHelpBot }) 
     /* eslint-disable-next-line */
   }, []);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters.rangeDays]);
+  // Reload whenever the active window changes — preset choice, custom start,
+  // or custom end. The `load()` itself short-circuits if custom dates are
+  // partially filled, so we don't fire half-formed queries.
+  useEffect(() => { load(); /* eslint-disable-next-line */ },
+    [filters.rangeDays, filters.rangeStart, filters.rangeEnd]);
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
@@ -178,9 +221,9 @@ function Dashboard({ session, onLastSyncChange, onLoadReady, onSendToHelpBot }) 
         <div className="xl:col-span-2 card p-5">
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="font-display text-2xl">Issues over time</h2>
-            <span className="label-tag">last {filters.rangeDays} days</span>
+            <span className="label-tag">{range.label}</span>
           </div>
-          <IssuesOverTimeChart issues={filtered} days={filters.rangeDays} />
+          <IssuesOverTimeChart issues={filtered} startDate={range.startDate} endDate={range.endDate} />
         </div>
         <div className="card p-5">
           <div className="flex items-baseline justify-between mb-4">
