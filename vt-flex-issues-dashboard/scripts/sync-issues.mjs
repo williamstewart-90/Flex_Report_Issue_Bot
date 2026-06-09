@@ -4,6 +4,7 @@
 // upserts to relational tables. Designed to run from GitHub Actions on a cron.
 
 import { createClient } from '@supabase/supabase-js';
+import { runNotifications } from './notify.mjs';
 
 const API_BASE         = process.env.VT_FLEX_API_BASE || 'https://api.varsitytutors.com';
 const API_PATH         = '/vt-flex/issues';
@@ -452,6 +453,10 @@ async function main() {
   let issuesUpserted = 0;
   let cursor = null;
 
+  // In MOCK_API mode, collect (flattened + raw) pairs so notify.mjs can
+  // triage the fixture data without hitting Supabase. No effect in normal runs.
+  const mockIssuesForNotify = [];
+
   try {
     do {
       const data = MOCK_API ? mockPage(cursor) : await fetchPage(cursor);
@@ -470,7 +475,9 @@ async function main() {
         const id = raw.issue_id;
         if (!id) continue;
         issueIdsInBatch.push(id);
-        issueRows.push(flattenIssue(raw));
+        const flat = flattenIssue(raw);
+        issueRows.push(flat);
+        if (MOCK_API) mockIssuesForNotify.push({ ...flat, __raw: raw });
 
         // supervisors
         for (const s of (raw.supervisors || [])) {
@@ -554,6 +561,18 @@ async function main() {
       error_message: null
     });
     console.log(`Done. Pages: ${pagesFetched}, issues: ${issuesUpserted}`);
+
+    // Manager-notification pipeline. Isolated in its own try/catch so any
+    // failure here is logged but does not poison the sync status.
+    try {
+      await runNotifications({
+        supabase,
+        dryRun:     DRY_RUN,
+        mockIssues: MOCK_API ? mockIssuesForNotify : null
+      });
+    } catch (notifyErr) {
+      console.error('Notification pipeline failed (sync still succeeded):', notifyErr);
+    }
   } catch (err) {
     console.error('Sync failed:', err);
     await recordRun({

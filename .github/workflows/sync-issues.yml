@@ -39,4 +39,20 @@ jobs:
           SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY:    ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           VT_FLEX_ISSUE_TYPE:           technical_issue
+
+          # ---- Manager notification pipeline (notify.mjs) ----
+          # See vt-flex-issues-dashboard/README.md "Manager-notification pipeline"
+          # for rollout details. NOTIFICATIONS_FORCE_TO acts as the shadow-mode
+          # switch: while set, every email routes there instead of supervisors.
+          ANTHROPIC_API_KEY:            ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:              ${{ secrets.ANTHROPIC_MODEL }}
+          ANTHROPIC_MAX_TOKENS:         ${{ secrets.ANTHROPIC_MAX_TOKENS }}
+          GMAIL_USER:                   ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD:           ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFICATIONS_FROM_EMAIL:     ${{ secrets.NOTIFICATIONS_FROM_EMAIL }}
+          NOTIFICATIONS_FORCE_TO:       ${{ secrets.NOTIFICATIONS_FORCE_TO }}
+          NOTIFICATIONS_ENABLED:        ${{ secrets.NOTIFICATIONS_ENABLED }}
+          MAX_NOTIFICATIONS_PER_RUN:    ${{ secrets.MAX_NOTIFICATIONS_PER_RUN }}
+          NOTIFICATIONS_RECENCY_HOURS:  ${{ secrets.NOTIFICATIONS_RECENCY_HOURS }}
+          DASHBOARD_BASE_URL:           ${{ secrets.DASHBOARD_BASE_URL }}
         run: node sync-issues.mjs

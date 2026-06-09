@@ -135,6 +135,63 @@ WHERE 'high_latency' = ANY(t.cm_tags)
 ORDER BY i.issue_created_at DESC;
 ```
 
+## Manager-notification pipeline (auto-email triage)
+
+After each successful sync, `scripts/notify.mjs` finds newly-arrived issues, runs each through the existing Flex Troubleshooting Assistant prompt (Claude Sonnet, same as the dashboard chatbot), and emails the AI-generated triage to the issue's supervisor(s) via Gmail SMTP.
+
+Pipeline:
+
+1. Find rows where `notified_at IS NULL` AND `issue_created_at > now() - NOTIFICATIONS_RECENCY_HOURS` AND `issue_type = 'technical_issue'`.
+2. For each (capped at `MAX_NOTIFICATIONS_PER_RUN`): build a slim triage payload, call Anthropic, send the email, set `notified_at`, log to `vt_flex_notifications`.
+3. Log the run summary to `vt_flex_notification_runs`.
+
+### Required setup
+
+1. Apply the migration in `supabase/migrations/003_notifications.sql`.
+2. On the sending Google account: enable 2FA, then generate a 16-char app password at https://myaccount.google.com/apppasswords (label it "Flex Issues Bot").
+3. Set these GitHub Actions secrets (in addition to the existing three):
+
+   | Secret | Purpose |
+   |---|---|
+   | `ANTHROPIC_API_KEY` | Same key the Netlify chat function uses |
+   | `GMAIL_USER` | Sending Gmail/Workspace account (e.g. `flex-alerts@varsitytutors.com`) |
+   | `GMAIL_APP_PASSWORD` | 16-char app password from step 2 |
+   | `NOTIFICATIONS_FROM_EMAIL` | From address (usually same as `GMAIL_USER`; can be a "send-as" alias) |
+   | `NOTIFICATIONS_FORCE_TO` | **Shadow mode** — while this is set, ALL emails route here. Set to your own email for the rollout. Unset to go live. |
+   | `DASHBOARD_BASE_URL` | e.g. `https://vt-flex-issues.netlify.app` — used to build "view in dashboard" links |
+   | `NOTIFICATIONS_ENABLED` | Optional master kill-switch (default `1`; set to `0` to pause) |
+   | `MAX_NOTIFICATIONS_PER_RUN` | Optional per-run cap (default `25`) |
+   | `NOTIFICATIONS_RECENCY_HOURS` | Optional recency window in hours (default `24`) |
+   | `ANTHROPIC_MODEL` | Optional model override (default `claude-sonnet-4-20250514`) |
+   | `ANTHROPIC_MAX_TOKENS` | Optional output cap (default `1200`) |
+
+### Rollout
+
+1. **Shadow week.** Ship with `NOTIFICATIONS_FORCE_TO=<your email>` set. Every issue triages and emails you so you can validate the AI's tone and accuracy before any manager sees it.
+2. **Iterate.** Adjust `scripts/lib/auto-triage-preamble.js` (or the knowledge base at `netlify/functions/lib/system-prompt.js`) based on what shows up in your inbox.
+3. **Go live.** Remove `NOTIFICATIONS_FORCE_TO` from the GitHub Actions secrets. Emails now route to the actual supervisor emails on each issue.
+4. **Pause anytime.** Set `NOTIFICATIONS_ENABLED=0`.
+
+### Local testing
+
+```bash
+cd scripts
+
+# Fully offline: uses the built-in fixture issues + Anthropic (real call) + prints email to stdout.
+# Requires ANTHROPIC_API_KEY in .env.local. Costs ~$0.02 to test all fixture issues.
+MOCK_API=1 DRY_RUN=1 node sync-issues.mjs
+
+# Re-run notify against a single issue_id that already exists in Supabase:
+node test-notification.mjs <issue_id>
+```
+
+### Editing the prompt
+
+- `netlify/functions/lib/system-prompt.js` — the shared knowledge base (also used by the chatbot).
+- `scripts/lib/auto-triage-preamble.js` — the email-mode override layered on top (one-shot output, fixed sections, no clarifying questions).
+
+Both are picked up automatically on the next sync run.
+
 ## Notes
 
 - Bearer token never touches the frontend.
