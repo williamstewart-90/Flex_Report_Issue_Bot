@@ -54,5 +54,4 @@ jobs:
           NOTIFICATIONS_ENABLED:        ${{ secrets.NOTIFICATIONS_ENABLED }}
           MAX_NOTIFICATIONS_PER_RUN:    ${{ secrets.MAX_NOTIFICATIONS_PER_RUN }}
           NOTIFICATIONS_RECENCY_HOURS:  ${{ secrets.NOTIFICATIONS_RECENCY_HOURS }}
-          DASHBOARD_BASE_URL:           ${{ secrets.DASHBOARD_BASE_URL }}
         run: node sync-issues.mjs

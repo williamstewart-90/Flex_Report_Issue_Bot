@@ -158,7 +158,6 @@ Pipeline:
    | `GMAIL_APP_PASSWORD` | 16-char app password from step 2 |
    | `NOTIFICATIONS_FROM_EMAIL` | From address (usually same as `GMAIL_USER`; can be a "send-as" alias) |
    | `NOTIFICATIONS_FORCE_TO` | **Shadow mode** — while this is set, ALL emails route here. Set to your own email for the rollout. Unset to go live. |
-   | `DASHBOARD_BASE_URL` | e.g. `https://vt-flex-issues.netlify.app` — used to build "view in dashboard" links |
    | `NOTIFICATIONS_ENABLED` | Optional master kill-switch (default `1`; set to `0` to pause) |
    | `MAX_NOTIFICATIONS_PER_RUN` | Optional per-run cap (default `25`) |
    | `NOTIFICATIONS_RECENCY_HOURS` | Optional recency window in hours (default `24`) |
