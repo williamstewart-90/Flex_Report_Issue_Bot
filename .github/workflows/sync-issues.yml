@@ -55,3 +55,24 @@ jobs:
           MAX_NOTIFICATIONS_PER_RUN:    ${{ secrets.MAX_NOTIFICATIONS_PER_RUN }}
           NOTIFICATIONS_RECENCY_HOURS:  ${{ secrets.NOTIFICATIONS_RECENCY_HOURS }}
         run: node sync-issues.mjs
+
+      # ---- Slack manager-notification route (post-to-slack.mjs) ----
+      # Runs after the sync + email pipeline. Posts actionable issues
+      # (filtered through scripts/lib/issue-filter.mjs) with full AI triage
+      # to SLACK_CHANNEL_ID. Isolated from the sync step via `if: always()`
+      # so a Slack outage never blocks the email pipeline or the data sync.
+      - name: Post to Slack
+        if: always()
+        working-directory: vt-flex-issues-dashboard/scripts
+        env:
+          SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:    ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY:            ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:              ${{ secrets.ANTHROPIC_MODEL }}
+          ANTHROPIC_MAX_TOKENS:         ${{ secrets.ANTHROPIC_MAX_TOKENS }}
+          SLACK_BOT_TOKEN:              ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID:             ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_ENABLED:                ${{ secrets.SLACK_ENABLED }}
+          MAX_SLACK_POSTS_PER_RUN:      ${{ secrets.MAX_SLACK_POSTS_PER_RUN }}
+          SLACK_RECENCY_HOURS:          ${{ secrets.SLACK_RECENCY_HOURS }}
+        run: node post-to-slack.mjs

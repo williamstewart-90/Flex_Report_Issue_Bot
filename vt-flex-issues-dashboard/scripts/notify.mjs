@@ -253,7 +253,9 @@ async function processIssue({ issue, supabase, transporter, cfg, dryRun, shadow,
 }
 
 // ---------- Triage payload (slim, focused) ----------
-function buildTriagePayload(issue, children) {
+// Exported so scripts/post-to-slack.mjs can reuse the exact same payload
+// shape that the email pipeline sends to Claude. Single source of truth.
+export function buildTriagePayload(issue, children) {
   return {
     issue_id: issue.issue_id,
     agent_description: issue.agent_description ?? null,
@@ -322,7 +324,9 @@ function buildTriagePayload(issue, children) {
 }
 
 // ---------- Anthropic call ----------
-async function callAnthropic(cfg, issue, children) {
+// Exported. `cfg` only needs the anthropic* fields, so the Slack pipeline
+// can construct a stub cfg with just those three to share this code.
+export async function callAnthropic(cfg, issue, children) {
   const system = `${KNOWLEDGE_BASE}\n\n${AUTO_TRIAGE_PREAMBLE}`;
   const payload = buildTriagePayload(issue, children);
   const userMessage = [

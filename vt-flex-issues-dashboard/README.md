@@ -191,6 +191,71 @@ node test-notification.mjs <issue_id>
 
 Both are picked up automatically on the next sync run.
 
+## Slack manager-notification route (`post-to-slack.mjs`)
+
+Sibling pipeline to the email route. Runs in the same hourly GitHub Action,
+right after the sync + email step. Posts each new technical issue to a
+Slack channel, with the same AI triage the email pipeline uses — except
+that `scripts/lib/issue-filter.mjs` first classifies the issue and
+**skips** routing/attribution complaints (Prof Certs, PC, Client Services,
+existing-client misroutes) since managers can't action those between
+calls.
+
+Pipeline:
+
+1. Find rows where `slack_posted_at IS NULL` AND `issue_created_at > now() - SLACK_RECENCY_HOURS` AND `issue_type = 'technical_issue'`.
+2. For each (capped at `MAX_SLACK_POSTS_PER_RUN`): classify, then either
+   (a) post the AI triage to Slack and stamp `slack_posted_at`, or
+   (b) skip (filtered) and still stamp `slack_posted_at` so we don't
+       re-classify forever.
+3. Log every decision to `vt_flex_slack_posts`; log the run summary to
+   `vt_flex_slack_runs`. The audit table records which filter rules
+   matched on skipped rows so the classifier can be tuned from real data.
+
+### One-time Slack app setup
+
+1. Go to https://api.slack.com/apps → **Create New App** → **From scratch**.
+   - App name: `VT Flex Issues`
+   - Workspace: VT
+2. **OAuth & Permissions** → add Bot Token Scopes: `chat:write`, `chat:write.public`.
+3. **Install App** → install to workspace (requires a workspace admin). Copy
+   the **Bot User OAuth Token** (`xoxb-…`) — this is `SLACK_BOT_TOKEN`.
+4. Find the channel ID for the destination channel (right-click channel
+   in Slack → View channel details → ID at the bottom). Spike-week
+   default: `#flex-support-help-bot` = `C0B7UGBJNQ3`.
+
+### Required GitHub Actions secrets (in addition to the email pipeline)
+
+| Secret | Purpose |
+|---|---|
+| `SLACK_BOT_TOKEN` | Bot User OAuth Token from the VT Flex Issues app |
+| `SLACK_CHANNEL_ID` | Destination channel ID (e.g. `C0B7UGBJNQ3`) |
+| `SLACK_ENABLED` | Optional master kill-switch (default on; set to `0` to pause) |
+| `MAX_SLACK_POSTS_PER_RUN` | Optional per-run cap (default `25`) |
+| `SLACK_RECENCY_HOURS` | Optional recency window in hours (default `24`) |
+
+Anthropic + Supabase secrets are reused from the email pipeline; no
+duplicate values needed.
+
+### Local testing
+
+```bash
+cd scripts
+
+# Dry-run against the real DB: classifies and triages everything but
+# never calls Slack and never writes to Supabase. Safe to run as often
+# as you want — only Anthropic charges.
+DRY_RUN=1 node post-to-slack.mjs
+```
+
+### Editing the filter
+
+`scripts/lib/issue-filter.mjs` holds the regex rules. Every filter
+decision is logged with the matched rule names in
+`vt_flex_slack_posts.filter_hits`, so after a week of live data you can
+query that table for misclassifications and tune the rules off real
+evidence.
+
 ## Notes
 
 - Bearer token never touches the frontend.
