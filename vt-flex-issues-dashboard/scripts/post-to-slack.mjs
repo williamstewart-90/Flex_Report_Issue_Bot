@@ -23,9 +23,13 @@ import { classifyIssue } from './lib/issue-filter.mjs';
 import { postMessage as slackPostMessage } from './lib/slack-client.mjs';
 
 // ---------- Config ----------
+// Auth: either SLACK_WEBHOOK_URL (preferred — works in workspaces that
+// require admin approval for bot-token apps), or SLACK_BOT_TOKEN +
+// SLACK_CHANNEL_ID (chat.postMessage). Webhook wins if both are set.
 function getConfig() {
   return {
     enabled:            process.env.SLACK_ENABLED !== '0',
+    slackWebhookUrl:    (process.env.SLACK_WEBHOOK_URL || '').trim(),
     slackBotToken:      (process.env.SLACK_BOT_TOKEN || '').trim(),
     slackChannelId:     (process.env.SLACK_CHANNEL_ID || '').trim(),
     supabaseUrl:        process.env.SUPABASE_URL,
@@ -52,9 +56,13 @@ async function main() {
   const missing = [];
   if (!cfg.supabaseUrl)     missing.push('SUPABASE_URL');
   if (!cfg.supabaseKey)     missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!cfg.slackBotToken)   missing.push('SLACK_BOT_TOKEN');
-  if (!cfg.slackChannelId)  missing.push('SLACK_CHANNEL_ID');
   if (!cfg.anthropicApiKey) missing.push('ANTHROPIC_API_KEY');
+  // Auth: webhook OR (bot token + channel id). Not both required.
+  const hasWebhook = !!cfg.slackWebhookUrl;
+  const hasBotAuth = !!cfg.slackBotToken && !!cfg.slackChannelId;
+  if (!hasWebhook && !hasBotAuth) {
+    missing.push('SLACK_WEBHOOK_URL (or SLACK_BOT_TOKEN + SLACK_CHANNEL_ID)');
+  }
   if (missing.length) {
     console.warn(`[slack] Skipping, missing env: ${missing.join(', ')}`);
     return;
@@ -64,7 +72,9 @@ async function main() {
     auth: { persistSession: false }
   });
 
-  console.log(`[slack] Starting${cfg.dryRun ? ' (dry-run)' : ''} → channel ${cfg.slackChannelId}`);
+  const transport = hasWebhook ? 'webhook' : 'bot-token';
+  const destLabel = hasWebhook ? '(via webhook)' : `channel ${cfg.slackChannelId}`;
+  console.log(`[slack] Starting${cfg.dryRun ? ' (dry-run)' : ''} → ${destLabel} [transport=${transport}]`);
 
   let issuesFound  = 0;
   let postsSent    = 0;
@@ -211,8 +221,9 @@ async function processIssue({ issue, supabase, cfg }) {
   }
 
   const slackRes = await slackPostMessage({
-    token:     cfg.slackBotToken,
-    channelId: cfg.slackChannelId,
+    webhookUrl: cfg.slackWebhookUrl,
+    token:      cfg.slackBotToken,
+    channelId:  cfg.slackChannelId,
     text
   });
 

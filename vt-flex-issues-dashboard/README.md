@@ -214,22 +214,40 @@ Pipeline:
 
 ### One-time Slack app setup
 
-1. Go to https://api.slack.com/apps → **Create New App** → **From scratch**.
-   - App name: `VT Flex Issues`
-   - Workspace: VT
-2. **OAuth & Permissions** → add Bot Token Scopes: `chat:write`, `chat:write.public`.
-3. **Install App** → install to workspace (requires a workspace admin). Copy
-   the **Bot User OAuth Token** (`xoxb-…`) — this is `SLACK_BOT_TOKEN`.
-4. Find the channel ID for the destination channel (right-click channel
-   in Slack → View channel details → ID at the bottom). Spike-week
-   default: `#flex-support-help-bot` = `C0B7UGBJNQ3`.
+Two auth paths. **Pick the one your workspace allows.**
+
+**Path 1 — Incoming webhook (recommended, no admin required).** Works in
+workspaces where bot-token apps need admin install approval.
+
+1. https://api.slack.com/apps → **Create New App** → **From scratch**.
+2. **Incoming Webhooks** → toggle ON.
+3. Click **Add New Webhook to Workspace** → pick the destination channel.
+   (Note: even this can require admin approval in some workspaces — but
+   it's a much smaller permissions ask than a full bot install.)
+4. Copy the webhook URL (`https://hooks.slack.com/services/T.../B.../...`)
+   — this is `SLACK_WEBHOOK_URL`.
+
+**Path 2 — Bot token (chat.postMessage).** Required if you ever want
+threaded replies, multi-channel routing, or to read messages.
+
+1. Same app as above. **OAuth & Permissions** → Bot Token Scopes:
+   `chat:write`, `chat:write.public`.
+2. **Install App** → install to workspace (admin approval). Copy the
+   `xoxb-…` token — this is `SLACK_BOT_TOKEN`.
+3. Find the channel ID (right-click channel → View channel details →
+   ID at the bottom). Spike-week default `#flex-support-help-bot` =
+   `C0B7UGBJNQ3` — this is `SLACK_CHANNEL_ID`.
+
+The code prefers the webhook when both are configured, so you can
+provision the bot token alongside without disrupting the webhook flow.
 
 ### Required GitHub Actions secrets (in addition to the email pipeline)
 
 | Secret | Purpose |
 |---|---|
-| `SLACK_BOT_TOKEN` | Bot User OAuth Token from the VT Flex Issues app |
-| `SLACK_CHANNEL_ID` | Destination channel ID (e.g. `C0B7UGBJNQ3`) |
+| `SLACK_WEBHOOK_URL` | **Preferred.** Incoming webhook URL from Path 1 above. |
+| `SLACK_BOT_TOKEN` | **Fallback.** Bot User OAuth Token from Path 2. Used iff `SLACK_WEBHOOK_URL` is unset. |
+| `SLACK_CHANNEL_ID` | Destination channel ID (e.g. `C0B7UGBJNQ3`). Required for the bot-token path; optional with webhook. |
 | `SLACK_ENABLED` | Optional master kill-switch (default on; set to `0` to pause) |
 | `MAX_SLACK_POSTS_PER_RUN` | Optional per-run cap (default `25`) |
 | `SLACK_RECENCY_HOURS` | Optional recency window in hours (default `24`) |
