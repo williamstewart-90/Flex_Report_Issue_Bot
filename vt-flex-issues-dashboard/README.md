@@ -274,6 +274,56 @@ decision is logged with the matched rule names in
 query that table for misclassifications and tune the rules off real
 evidence.
 
+### Manager @mentions
+
+Each post leads with `<@U…> <@U…> — heads up, …` so the supervisor
+gets a real Slack notification (with mobile push). The lookup table
+is `vt_flex_slack_user_map`. Webhooks have no `users.lookupByEmail`,
+so it's hand-seeded.
+
+**Adding a manager:**
+
+1. In Slack desktop, click their avatar → **View profile** → **`...`**
+   menu → **Copy member ID**. You'll get something like `U01ABC234`.
+2. Insert into Supabase:
+
+   ```sql
+   INSERT INTO vt_flex_slack_user_map (email, slack_user_id, display_name)
+   VALUES ('emily.krenzke@varsitytutors.com', 'U01ABC234', 'Emily Krenzke')
+   ON CONFLICT (email) DO UPDATE
+     SET slack_user_id = EXCLUDED.slack_user_id,
+         display_name  = EXCLUDED.display_name,
+         updated_at    = NOW();
+   ```
+
+**Finding the work queue (who's missing):**
+
+```sql
+SELECT DISTINCT unnest(unmapped_supervisor_emails) AS email
+FROM vt_flex_slack_posts
+WHERE unmapped_supervisor_emails IS NOT NULL
+  AND array_length(unmapped_supervisor_emails, 1) > 0
+  AND posted_at > NOW() - INTERVAL '7 days'
+ORDER BY 1;
+```
+
+Posts go out even if no supervisors are mapped — just without a
+mention prefix. The unmapped emails get logged so you can seed
+incrementally without losing posts.
+
+### Editing the post format
+
+`scripts/post-to-slack.mjs` is where the message layout lives:
+
+- `buildSlackMessage(issue, triageMd, managerMentions)` — overall post
+  structure (mention line, header, rep quote, AI triage).
+- `SLACK_STRIPPED_SECTIONS` — array of section headers to drop from
+  the AI triage before posting. Currently `['Likely cause', 'Confidence']`
+  to keep posts terse. The email pipeline keeps these sections.
+- `stripSections(md, names)` — the line-iteration helper that does the
+  drop. Unit-tested for header-at-end, header-in-middle, and
+  header-already-missing cases.
+
 ## Notes
 
 - Bearer token never touches the frontend.

@@ -149,6 +149,30 @@ async function fetchChildren(supabase, issueId) {
   };
 }
 
+// Look up Slack user IDs for the issue's supervisor emails. Returns
+// the mapped users to @mention plus the unmapped emails (audit fodder
+// so the seeder knows who's missing).
+async function fetchManagerMentions(supabase, supervisors) {
+  const emails = (supervisors || [])
+    .map((s) => s.supervisor_email)
+    .filter(Boolean);
+  const uniqueEmails = [...new Set(emails)];
+  if (uniqueEmails.length === 0) return { mapped: [], unmapped: [] };
+
+  const { data, error } = await supabase
+    .from('vt_flex_slack_user_map')
+    .select('email, slack_user_id, display_name')
+    .in('email', uniqueEmails);
+  if (error) {
+    console.error(`[slack] user-map lookup failed: ${error.message}`);
+    return { mapped: [], unmapped: uniqueEmails };
+  }
+  const mapped = data || [];
+  const mappedSet = new Set(mapped.map((r) => r.email));
+  const unmapped = uniqueEmails.filter((e) => !mappedSet.has(e));
+  return { mapped, unmapped };
+}
+
 // ---------- Per-issue pipeline ----------
 async function processIssue({ issue, supabase, cfg }) {
   const auditBase = {
@@ -167,11 +191,13 @@ async function processIssue({ issue, supabase, cfg }) {
     await markPosted(supabase, cfg, issue.issue_id);
     await logPost(supabase, cfg, {
       ...auditBase,
-      channel_id:  null,
-      message_ts:  null,
-      status:      'skipped_filtered',
-      filter_hits: hits,
-      error:       null
+      channel_id:                null,
+      message_ts:                null,
+      status:                    'skipped_filtered',
+      filter_hits:               hits,
+      mentioned_user_ids:        null,
+      unmapped_supervisor_emails: null,
+      error:                     null
     });
     return { status: 'skipped_filtered' };
   }
@@ -194,16 +220,26 @@ async function processIssue({ issue, supabase, cfg }) {
     console.error(`[slack] Anthropic failed ${issue.issue_id}: ${msg}`);
     await logPost(supabase, cfg, {
       ...auditBase,
-      message_ts:  null,
-      status:      'anthropic_failed',
-      filter_hits: null,
-      error:       msg
+      message_ts:                null,
+      status:                    'anthropic_failed',
+      filter_hits:               null,
+      mentioned_user_ids:        null,
+      unmapped_supervisor_emails: null,
+      error:                     msg
     });
     return { status: 'anthropic_failed' };
   }
 
-  // 3. Format + post to Slack.
-  const text = buildSlackMessage(issue, triageMd);
+  // 3. Look up manager @mentions (best-effort; never blocks the post).
+  const { mapped: managerMentions, unmapped: unmappedEmails } =
+    await fetchManagerMentions(supabase, children.supervisors);
+  if (unmappedEmails.length) {
+    console.log(`[slack] ${issue.issue_id} unmapped supervisors: ${unmappedEmails.join(', ')}`);
+  }
+
+  // 4. Format + post to Slack.
+  const text = buildSlackMessage(issue, triageMd, managerMentions);
+  const mentionedIds = managerMentions.map((m) => m.slack_user_id);
 
   if (cfg.dryRun) {
     console.log('────────────────────────────────────────────────────────');
@@ -212,10 +248,12 @@ async function processIssue({ issue, supabase, cfg }) {
     console.log('────────────────────────────────────────────────────────');
     await logPost(supabase, cfg, {
       ...auditBase,
-      message_ts:  null,
-      status:      'posted',          // count dry-runs as posted for reporting
-      filter_hits: null,
-      error:       null
+      message_ts:                null,
+      status:                    'posted',
+      filter_hits:               null,
+      mentioned_user_ids:        mentionedIds,
+      unmapped_supervisor_emails: unmappedEmails,
+      error:                     null
     });
     return { status: 'posted' };
   }
@@ -231,10 +269,12 @@ async function processIssue({ issue, supabase, cfg }) {
     console.error(`[slack] Slack post failed ${issue.issue_id}: ${slackRes.error}`);
     await logPost(supabase, cfg, {
       ...auditBase,
-      message_ts:  null,
-      status:      'slack_failed',
-      filter_hits: null,
-      error:       slackRes.error
+      message_ts:                null,
+      status:                    'slack_failed',
+      filter_hits:               null,
+      mentioned_user_ids:        mentionedIds,
+      unmapped_supervisor_emails: unmappedEmails,
+      error:                     slackRes.error
     });
     return { status: 'slack_failed' };
   }
@@ -242,12 +282,14 @@ async function processIssue({ issue, supabase, cfg }) {
   await markPosted(supabase, cfg, issue.issue_id);
   await logPost(supabase, cfg, {
     ...auditBase,
-    message_ts:  slackRes.ts,
-    status:      'posted',
-    filter_hits: null,
-    error:       null
+    message_ts:                slackRes.ts,
+    status:                    'posted',
+    filter_hits:               null,
+    mentioned_user_ids:        mentionedIds,
+    unmapped_supervisor_emails: unmappedEmails,
+    error:                     null
   });
-  console.log(`[slack] POSTED ${issue.issue_id} → ts=${slackRes.ts}`);
+  console.log(`[slack] POSTED ${issue.issue_id} → ts=${slackRes.ts || 'webhook'} mentions=${mentionedIds.length}`);
   return { status: 'posted' };
 }
 
@@ -257,7 +299,19 @@ async function processIssue({ issue, supabase, cfg }) {
 // markdown from Claude uses **bold** (double asterisks) per the email
 // preamble, so we convert it down to *bold* here. Numbered lists are kept
 // as-is — Slack renders them as monospace-leading text, which is fine.
-function buildSlackMessage(issue, triageMd) {
+//
+// For Slack-mode posts we also strip the "Likely cause" and "Confidence"
+// sections that Claude emits — managers want the TL;DR and the action
+// steps, not the diagnostic narrative. The email pipeline keeps them.
+const SLACK_STRIPPED_SECTIONS = ['Likely cause', 'Confidence'];
+
+function buildSlackMessage(issue, triageMd, managerMentions) {
+  // Mention line first so the Slack notification preview leads with
+  // "<Manager> mentioned you" — that's what surfaces on mobile.
+  const mentionLine = managerMentions && managerMentions.length
+    ? `${managerMentions.map((m) => `<@${m.slack_user_id}>`).join(' ')} — heads up, one of your reps just submitted a Flex issue:`
+    : null;
+
   const headerLines = [
     `:rotating_light: *[Flex Issue]  ${escapeMrkdwn(issue.agent_name || 'Unknown rep')} — ${escapeMrkdwn(snippet(issue.agent_description, 80))}*`,
     `> *Rep:* ${escapeMrkdwn(issue.agent_name || 'unknown')}${issue.worker_email ? ` ‹${escapeMrkdwn(issue.worker_email)}›` : ''}`,
@@ -269,12 +323,50 @@ function buildSlackMessage(issue, triageMd) {
     `> _"${escapeMrkdwn(issue.agent_description || '(none provided)')}"_`
   ];
 
-  const triage = mdToSlack(triageMd);
+  const triage = mdToSlack(stripSections(triageMd, SLACK_STRIPPED_SECTIONS));
+
+  const parts = [];
+  if (mentionLine) parts.push(mentionLine, '');
+  parts.push(...headerLines, '', ...repDescription, '', triage);
 
   // Slack chat.postMessage hard caps at 40000 chars; the section block at
   // 3000. We're well under both in practice. Belt-and-suspenders truncate.
-  const full = [...headerLines, '', ...repDescription, '', triage].join('\n');
+  const full = parts.join('\n');
   return full.length > 39000 ? full.slice(0, 38990) + '\n…(truncated)' : full;
+}
+
+// Strip whole **Header:** sections from a markdown string. A section
+// starts at `**Header:**` and ends just before the next `**...**`
+// header at line start, or at end-of-string.
+//
+// Line-iteration rather than a multiline regex because JS has no \Z
+// (end-of-string) anchor — the `$` in /m/ matches end-of-LINE, which
+// would never match the last section. Iteration also makes it trivial
+// to verify by reading the loop.
+//
+// We do this at the post-formatting step (not by editing the AI
+// prompt) so the email pipeline keeps the full content while Slack
+// stays terse.
+function stripSections(md, sectionNames) {
+  if (!md || !sectionNames || !sectionNames.length) return md || '';
+  const escaped  = sectionNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const stripRe  = new RegExp(`^\\*\\*(?:${escaped.join('|')}):?\\*\\*`, 'i');
+  const headerRe = /^\*\*[^*\n]+\*\*/;
+
+  const out = [];
+  let dropping = false;
+  for (const line of md.split('\n')) {
+    const trimmed = line.trimStart();
+    if (stripRe.test(trimmed)) {
+      dropping = true;
+      continue;
+    }
+    if (dropping && headerRe.test(trimmed)) {
+      dropping = false;
+    }
+    if (!dropping) out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // Convert Claude's **bold** to Slack's *bold*, and -- to em dash (cosmetic).
