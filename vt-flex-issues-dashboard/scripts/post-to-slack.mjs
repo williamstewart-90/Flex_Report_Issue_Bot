@@ -149,28 +149,25 @@ async function fetchChildren(supabase, issueId) {
   };
 }
 
-// Look up Slack user IDs for the issue's supervisor emails. Returns
-// the mapped users to @mention plus the unmapped emails (audit fodder
-// so the seeder knows who's missing).
-async function fetchManagerMentions(supabase, supervisors) {
-  const emails = (supervisors || [])
-    .map((s) => s.supervisor_email)
-    .filter(Boolean);
-  const uniqueEmails = [...new Set(emails)];
-  if (uniqueEmails.length === 0) return { mapped: [], unmapped: [] };
+// Look up the Slack user ID for the issue's team manager. team_name on
+// vt_flex_issues is the rep's actual manager (e.g. "Kimberly Murdock") —
+// a tighter signal than the supervisor list (which is a wider matrix).
+// Returns the mapped row to @mention (or null) plus the unmapped team
+// name (or null) for the seeding work-queue.
+async function fetchTeamManagerMention(supabase, teamName) {
+  if (!teamName) return { mention: null, unmapped: null };
 
   const { data, error } = await supabase
-    .from('vt_flex_slack_user_map')
-    .select('email, slack_user_id, display_name')
-    .in('email', uniqueEmails);
+    .from('vt_flex_slack_team_managers')
+    .select('team_name, slack_user_id, display_name')
+    .eq('team_name', teamName)
+    .maybeSingle();
   if (error) {
-    console.error(`[slack] user-map lookup failed: ${error.message}`);
-    return { mapped: [], unmapped: uniqueEmails };
+    console.error(`[slack] team-manager lookup failed: ${error.message}`);
+    return { mention: null, unmapped: teamName };
   }
-  const mapped = data || [];
-  const mappedSet = new Set(mapped.map((r) => r.email));
-  const unmapped = uniqueEmails.filter((e) => !mappedSet.has(e));
-  return { mapped, unmapped };
+  if (!data) return { mention: null, unmapped: teamName };
+  return { mention: data, unmapped: null };
 }
 
 // ---------- Per-issue pipeline ----------
@@ -191,13 +188,13 @@ async function processIssue({ issue, supabase, cfg }) {
     await markPosted(supabase, cfg, issue.issue_id);
     await logPost(supabase, cfg, {
       ...auditBase,
-      channel_id:                null,
-      message_ts:                null,
-      status:                    'skipped_filtered',
-      filter_hits:               hits,
-      mentioned_user_ids:        null,
-      unmapped_supervisor_emails: null,
-      error:                     null
+      channel_id:         null,
+      message_ts:         null,
+      status:             'skipped_filtered',
+      filter_hits:        hits,
+      mentioned_user_ids: null,
+      unmapped_team_name: null,
+      error:              null
     });
     return { status: 'skipped_filtered' };
   }
@@ -220,24 +217,25 @@ async function processIssue({ issue, supabase, cfg }) {
     console.error(`[slack] Anthropic failed ${issue.issue_id}: ${msg}`);
     await logPost(supabase, cfg, {
       ...auditBase,
-      message_ts:                null,
-      status:                    'anthropic_failed',
-      filter_hits:               null,
-      mentioned_user_ids:        null,
-      unmapped_supervisor_emails: null,
-      error:                     msg
+      message_ts:         null,
+      status:             'anthropic_failed',
+      filter_hits:        null,
+      mentioned_user_ids: null,
+      unmapped_team_name: null,
+      error:              msg
     });
     return { status: 'anthropic_failed' };
   }
 
-  // 3. Look up manager @mentions (best-effort; never blocks the post).
-  const { mapped: managerMentions, unmapped: unmappedEmails } =
-    await fetchManagerMentions(supabase, children.supervisors);
-  if (unmappedEmails.length) {
-    console.log(`[slack] ${issue.issue_id} unmapped supervisors: ${unmappedEmails.join(', ')}`);
+  // 3. Look up the team manager @mention (best-effort; never blocks the post).
+  const { mention: teamManager, unmapped: unmappedTeamName } =
+    await fetchTeamManagerMention(supabase, issue.team_name);
+  if (unmappedTeamName) {
+    console.log(`[slack] ${issue.issue_id} unmapped team: ${unmappedTeamName}`);
   }
 
   // 4. Format + post to Slack.
+  const managerMentions = teamManager ? [teamManager] : [];
   const text = buildSlackMessage(issue, triageMd, managerMentions);
   const mentionedIds = managerMentions.map((m) => m.slack_user_id);
 
@@ -248,12 +246,12 @@ async function processIssue({ issue, supabase, cfg }) {
     console.log('────────────────────────────────────────────────────────');
     await logPost(supabase, cfg, {
       ...auditBase,
-      message_ts:                null,
-      status:                    'posted',
-      filter_hits:               null,
-      mentioned_user_ids:        mentionedIds,
-      unmapped_supervisor_emails: unmappedEmails,
-      error:                     null
+      message_ts:         null,
+      status:             'posted',
+      filter_hits:        null,
+      mentioned_user_ids: mentionedIds,
+      unmapped_team_name: unmappedTeamName,
+      error:              null
     });
     return { status: 'posted' };
   }
@@ -269,12 +267,12 @@ async function processIssue({ issue, supabase, cfg }) {
     console.error(`[slack] Slack post failed ${issue.issue_id}: ${slackRes.error}`);
     await logPost(supabase, cfg, {
       ...auditBase,
-      message_ts:                null,
-      status:                    'slack_failed',
-      filter_hits:               null,
-      mentioned_user_ids:        mentionedIds,
-      unmapped_supervisor_emails: unmappedEmails,
-      error:                     slackRes.error
+      message_ts:         null,
+      status:             'slack_failed',
+      filter_hits:        null,
+      mentioned_user_ids: mentionedIds,
+      unmapped_team_name: unmappedTeamName,
+      error:              slackRes.error
     });
     return { status: 'slack_failed' };
   }
@@ -282,12 +280,12 @@ async function processIssue({ issue, supabase, cfg }) {
   await markPosted(supabase, cfg, issue.issue_id);
   await logPost(supabase, cfg, {
     ...auditBase,
-    message_ts:                slackRes.ts,
-    status:                    'posted',
-    filter_hits:               null,
-    mentioned_user_ids:        mentionedIds,
-    unmapped_supervisor_emails: unmappedEmails,
-    error:                     null
+    message_ts:         slackRes.ts,
+    status:             'posted',
+    filter_hits:        null,
+    mentioned_user_ids: mentionedIds,
+    unmapped_team_name: unmappedTeamName,
+    error:              null
   });
   console.log(`[slack] POSTED ${issue.issue_id} → ts=${slackRes.ts || 'webhook'} mentions=${mentionedIds.length}`);
   return { status: 'posted' };

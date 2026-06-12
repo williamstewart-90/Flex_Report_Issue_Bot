@@ -276,10 +276,13 @@ evidence.
 
 ### Manager @mentions
 
-Each post leads with `<@U…> <@U…> — heads up, …` so the supervisor
-gets a real Slack notification (with mobile push). The lookup table
-is `vt_flex_slack_user_map`. Webhooks have no `users.lookupByEmail`,
-so it's hand-seeded.
+Each post leads with `<@U…> — heads up, …` so the rep's team
+manager gets a real Slack notification (with mobile push). The
+lookup is keyed on `vt_flex_issues.team_name` (e.g. "Kimberly
+Murdock"), which is the rep's actual manager — a much tighter
+signal than the supervisor matrix. Mapping table:
+`vt_flex_slack_team_managers`. Hand-seeded (webhooks have no
+`users.lookupByEmail`).
 
 **Adding a manager:**
 
@@ -288,28 +291,35 @@ so it's hand-seeded.
 2. Insert into Supabase:
 
    ```sql
-   INSERT INTO vt_flex_slack_user_map (email, slack_user_id, display_name)
-   VALUES ('emily.krenzke@varsitytutors.com', 'U01ABC234', 'Emily Krenzke')
-   ON CONFLICT (email) DO UPDATE
+   INSERT INTO vt_flex_slack_team_managers (team_name, slack_user_id, display_name, email)
+   VALUES ('Kimberly Murdock', 'U01ABC234', 'Kimberly Murdock', 'kimberly.murdock@varsitytutors.com')
+   ON CONFLICT (team_name) DO UPDATE
      SET slack_user_id = EXCLUDED.slack_user_id,
          display_name  = EXCLUDED.display_name,
+         email         = EXCLUDED.email,
          updated_at    = NOW();
    ```
 
-**Finding the work queue (who's missing):**
+   The `team_name` value MUST match the issue's `team_name` exactly
+   (case-sensitive). Check what's coming in:
+   `SELECT DISTINCT team_name FROM vt_flex_issues WHERE issue_created_at > NOW() - INTERVAL '7 days' ORDER BY 1;`
+
+**Finding the work queue (which teams are missing):**
 
 ```sql
-SELECT DISTINCT unnest(unmapped_supervisor_emails) AS email
+SELECT unmapped_team_name, count(*) AS posts_missed
 FROM vt_flex_slack_posts
-WHERE unmapped_supervisor_emails IS NOT NULL
-  AND array_length(unmapped_supervisor_emails, 1) > 0
+WHERE unmapped_team_name IS NOT NULL
   AND posted_at > NOW() - INTERVAL '7 days'
-ORDER BY 1;
+GROUP BY 1
+ORDER BY 2 DESC;
 ```
 
-Posts go out even if no supervisors are mapped — just without a
-mention prefix. The unmapped emails get logged so you can seed
-incrementally without losing posts.
+Posts go out even if the team isn't mapped — just without a mention
+prefix. The unmapped team name gets logged so you can seed
+incrementally without losing posts. Special team values like
+`default` or `Retention` (departments without a single manager)
+can simply be left unmapped.
 
 ### Editing the post format
 
