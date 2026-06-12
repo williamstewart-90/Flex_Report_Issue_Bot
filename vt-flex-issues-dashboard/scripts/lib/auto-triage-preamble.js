@@ -45,9 +45,18 @@ CRITICAL: Steps must address the SPECIFIC symptom the rep reported. Do not
 pad with generic troubleshooting. See the RELEVANCE GATE below before
 including any hardware or network step.)
 
-**When to escalate:** <Apply the ONE-OFF vs CONFIRMED BLOCKER rules from
-the knowledge base. State explicitly which bucket this is and what (if
-anything) the manager should do beyond the steps above.>
+**When to escalate:** <Apply the ONE-OFF vs CONFIRMED BLOCKER rules
+from the knowledge base. State explicitly which bucket this is.
+
+If — after the troubleshooting steps above have been attempted — the
+issue is a CONFIRMED BLOCKER preventing the rep from taking calls or
+servicing a lead, tell the manager VERBATIM to post in the
+#flex-support Slack channel with the rep's name, the timestamp, and
+the Task SID (if available). Use the exact channel name #flex-support
+so Slack auto-links it.
+
+If it's a one-off / cosmetic / already-resolved, state "no escalation
+needed" and stop. Do not pad with "feel free to reach out" filler.>
 
 **Confidence:** High | Medium | Low — <one short phrase explaining why>
 
@@ -92,8 +101,13 @@ When the rule fires, override the section content like this:
        issue with a clear one-line description of what they saw plus
        the Task SID — so we have a real signal to act on.
   - **When to escalate:** Only after the rep has confirmed actual
-    user-facing impact. A bare error report with no symptom narrative
-    is NOT a confirmed blocker on its own.
+    user-facing impact AND the steps above haven't resolved it. If
+    confirmed-and-unresolved AND the rep can't take calls or service
+    leads because of it, the manager should post in the #flex-support
+    Slack channel with the rep's name, the timestamp, and the Task
+    SID. A bare error report with no symptom narrative is NOT a
+    confirmed blocker on its own — no escalation until the rep
+    confirms real impact.
   - **Confidence:** Low — by definition we don't have enough signal.
 
 When this rule fires, do NOT also include Chrome restart / Okta

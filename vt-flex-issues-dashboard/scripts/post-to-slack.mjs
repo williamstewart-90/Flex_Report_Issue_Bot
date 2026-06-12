@@ -236,7 +236,7 @@ async function processIssue({ issue, supabase, cfg }) {
 
   // 4. Format + post to Slack.
   const managerMentions = teamManager ? [teamManager] : [];
-  const text = buildSlackMessage(issue, triageMd, managerMentions);
+  const text = buildSlackMessage(issue, triageMd, managerMentions, children.tasks);
   const mentionedIds = managerMentions.map((m) => m.slack_user_id);
 
   if (cfg.dryRun) {
@@ -303,17 +303,19 @@ async function processIssue({ issue, supabase, cfg }) {
 // steps, not the diagnostic narrative. The email pipeline keeps them.
 const SLACK_STRIPPED_SECTIONS = ['Likely cause', 'Confidence'];
 
-function buildSlackMessage(issue, triageMd, managerMentions) {
+function buildSlackMessage(issue, triageMd, managerMentions, tasks) {
   // Mention line first so the Slack notification preview leads with
   // "<Manager> mentioned you" — that's what surfaces on mobile.
   const mentionLine = managerMentions && managerMentions.length
     ? `${managerMentions.map((m) => `<@${m.slack_user_id}>`).join(' ')} — heads up, one of your reps just submitted a Flex issue:`
     : null;
 
+  const taskSidLine = formatTaskSidLine(tasks);
+
   const headerLines = [
     `:rotating_light: *[Flex Issue]  ${escapeMrkdwn(issue.agent_name || 'Unknown rep')} — ${escapeMrkdwn(snippet(issue.agent_description, 80))}*`,
     `> *Rep:* ${escapeMrkdwn(issue.agent_name || 'unknown')}${issue.worker_email ? ` ‹${escapeMrkdwn(issue.worker_email)}›` : ''}`,
-    `> *Team:* ${escapeMrkdwn(issue.team_name || 'unknown')}    *Submitted:* ${escapeMrkdwn(formatTimestamp(issue.issue_created_at))}    *Plugin:* ${escapeMrkdwn(issue.plugin_version || 'unknown')}`
+    `> *Team:* ${escapeMrkdwn(issue.team_name || 'unknown')}    *Submitted:* ${escapeMrkdwn(formatTimestamp(issue.issue_created_at))}${taskSidLine}`
   ];
 
   const repDescription = [
@@ -378,6 +380,23 @@ function mdToSlack(md) {
 function snippet(s, n) {
   const text = String(s || '').replace(/\s+/g, ' ').trim();
   return text.length > n ? text.slice(0, n - 1) + '…' : text;
+}
+
+// Pick the most relevant task SID for the header. Flex API convention:
+// recent_tasks is ordered most-recent-first, persisted as task_order=0
+// being the most recent (the task that triggered the issue submission).
+// If there are additional tasks we surface a "+N more" hint so the
+// manager knows there's more context if they pull the full report.
+function formatTaskSidLine(tasks) {
+  if (!tasks || tasks.length === 0) return '';
+  const sorted = [...tasks].sort((a, b) => (a.task_order ?? 0) - (b.task_order ?? 0));
+  const primary = sorted[0]?.task_sid;
+  if (!primary) return '';
+  const extra = sorted.length - 1;
+  // Wrap in backticks so Slack renders it monospaced — easier to
+  // copy without grabbing trailing punctuation, and visually
+  // distinct from the rest of the header.
+  return `    *Task SID:* \`${escapeMrkdwn(primary)}\`${extra > 0 ? ` _(+${extra} more)_` : ''}`;
 }
 
 // Slack mrkdwn requires escaping <, >, &. Stars/underscores/backticks are
