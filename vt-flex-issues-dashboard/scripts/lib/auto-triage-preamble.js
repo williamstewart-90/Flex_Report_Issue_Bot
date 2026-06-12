@@ -51,6 +51,55 @@ anything) the manager should do beyond the steps above.>
 
 **Confidence:** High | Medium | Low — <one short phrase explaining why>
 
+--- BARE-ERROR-CODE RULE (check this FIRST, before any other rule) ---
+
+Many Flex errors are informational, transient, or cosmetic — a 404 on a
+sub-resource fetch, a "Flex degraded" banner, a stack-trace dump pasted
+into the description — and the rep often keeps working without ever
+noticing real impact. If the manager runs the rep through a Chrome-restart
++ Okta-relogin playbook for one of these, the rep loses 2-3 minutes of
+call time for nothing.
+
+A report is BARE-ERROR-CODE shaped when ALL of these are true:
+  - The agent_description is dominated by system-generated text:
+    timestamps, "ERROR: <code>", "Request failed with status code N",
+    stack frames, "Flex degraded", or similar Flex / browser console
+    output pasted in verbatim.
+  - The rep has NOT described any user-facing symptom in their own
+    words. Look for FIRST-PERSON narrative like "I couldn't hear",
+    "the lead dropped", "froze on me", "button was missing", "wrong
+    queue", "stuck offline", "audio was choppy", "couldn't transfer".
+    If you cannot find a sentence written by the human, the rule fires.
+  - There are no recent_tasks[].cm_tags or wcm_tags flags that
+    independently confirm real impact (no silence / one_way_audio /
+    high_packet_loss / high_jitter / etc.).
+
+When the rule fires, override the section content like this:
+  - **TL;DR:** "<rep> reported a Flex error but didn't describe a
+    specific symptom — this may be informational / cosmetic."
+  - **Likely cause:** State plainly that we can't tell from the report
+    whether this is a real blocker or just Flex surfacing a benign
+    error. Name the error if you can ("a 404 on outbound settings",
+    "a Flex degraded banner"). Do NOT speculate further.
+  - **What your rep should do (in order):**
+    1. Have the manager check in with the rep (DM or quick Slack) and
+       ask what they were trying to do when the error appeared, and
+       whether it actually blocked them from completing the call /
+       sending the email / etc.
+    2. If the rep confirms real impact, have them reload Flex and
+       re-login via Okta, then retry.
+    3. If the symptom reproduces, have the rep submit a new Flex
+       issue with a clear one-line description of what they saw plus
+       the Task SID — so we have a real signal to act on.
+  - **When to escalate:** Only after the rep has confirmed actual
+    user-facing impact. A bare error report with no symptom narrative
+    is NOT a confirmed blocker on its own.
+  - **Confidence:** Low — by definition we don't have enough signal.
+
+When this rule fires, do NOT also include Chrome restart / Okta
+relogin / wired ethernet / wired headset / clear-cache steps in the
+first slot. Those come AFTER the rep confirms a real symptom.
+
 --- RELEVANCE GATE for hardware / network recommendations ---
 
 The default chatbot lives in "always check hardware first" mode. In this
