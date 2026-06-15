@@ -69,7 +69,9 @@ Add three repo secrets at `Settings → Secrets and variables → Actions`:
 - `SUPABASE_URL`             — `https://xtvesnascwiecohvkstd.supabase.co`
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (not anon)
 
-Trigger the first run from the **Actions** tab → `Sync VT Flex Issues` → Run workflow. The cron is set to every 15 minutes; adjust in `.github/workflows/sync-issues.yml`.
+Trigger the first run from the **Actions** tab → `Sync VT Flex Issues` → Run workflow. The cron is set to **every 5 minutes, Mon–Fri, 12:00–23:55 UTC** (≈ 7 AM–7 PM Central). The cron string and other presets (24/7, tighter intervals, weekdays-only business hours) live in `.github/workflows/sync-issues.yml`.
+
+**GitHub Actions cost:** the current schedule burns ~6,200 min/month, which exceeds the free 2,000 min/month allowance for private personal repos. Plan options: tighten to weekdays 8 AM–5 PM only (`*/5 13-22 * * 1-5`, ~5K min/mo), drop back to hourly (~720 min/mo, free), or upgrade GitHub plan. See the comment block atop the workflow file for plug-in alternatives.
 
 ### 3. Netlify
 
@@ -193,7 +195,7 @@ Both are picked up automatically on the next sync run.
 
 ## Slack manager-notification route (`post-to-slack.mjs`)
 
-Sibling pipeline to the email route. Runs in the same hourly GitHub Action,
+Sibling pipeline to the email route. Runs in the same GitHub Action,
 right after the sync + email step. Posts each new technical issue to a
 Slack channel, with the same AI triage the email pipeline uses — except
 that `scripts/lib/issue-filter.mjs` first classifies the issue and
@@ -338,5 +340,5 @@ can simply be left unmapped.
 
 - Bearer token never touches the frontend.
 - The schema uses snake_case columns; the dotted naming you asked about (e.g. `recent_tasks.task_sid`) is preserved by the table prefix + column name (`vt_flex_recent_tasks.task_sid`). If you want literal dotted column names, Postgres requires quoting them everywhere; the snake_case convention plays nicer with PostgREST/Supabase clients.
-- Adjust the cron in `.github/workflows/sync-issues.yml`. GitHub schedules are best-effort and can drift a few minutes.
+- Adjust the cron in `.github/workflows/sync-issues.yml` (the comment block at the top has pre-baked alternatives). GitHub schedules are best-effort and can drift 5–10 minutes during peak load.
 - `MAX_PAGES` defaults to 200 (20,000 issues at `PAGE_LIMIT=100`). Bump if your backfill is larger.

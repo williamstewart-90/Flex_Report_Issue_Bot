@@ -2,10 +2,24 @@ name: Sync VT Flex Issues
 
 on:
   schedule:
-    # Top of every hour (UTC). GitHub Actions cron is UTC-only.
-    # If you ever want to bias toward business hours, restrict to a range,
-    # e.g. '0 12-23 * * *' would run 7 AM - 6 PM Central.
-    - cron: '0 * * * *'
+    # Every 5 minutes, 12:00-23:55 UTC, Monday-Friday.
+    # That's roughly 7 AM - 7 PM Central (CDT) / 6 AM - 6 PM Central (CST),
+    # M-F. Goal: cut the rep-submits-issue -> manager-gets-pinged latency
+    # from ~30-60 min (hourly cron + GH cron drift) down to 5-15 min during
+    # the hours managers are actually online.
+    #
+    # GitHub Actions cron is UTC-only and "best effort" — real runs can
+    # still drift 5-10 min during peak load on the runner.
+    #
+    # Cost: 12 runs/hr * ~2 min * 12 hrs * 5 days * 4.3 wks ≈ 6,200 min/mo.
+    # Free tier (private repo) is 2,000 min/mo — see README for plan notes.
+    #
+    # Tuning knobs:
+    #   '*/3 12-23 * * 1-5'    tighter ~3-min latency, ~10K min/mo
+    #   '*/5 11-2  * * *'      6 AM - 9 PM Central, every day, ~12K min/mo
+    #   '*/5 13-22 * * 1-5'    8 AM - 5 PM Central only, ~5K min/mo
+    #   '0 * * * *'            original hourly, ~720 min/mo (free-tier safe)
+    - cron: '*/5 12-23 * * 1-5'
   workflow_dispatch:    # Allow manual runs from the Actions tab
 
 concurrency:
