@@ -22,6 +22,38 @@ import { buildTriagePayload, callAnthropic } from './notify.mjs';
 import { classifyIssue } from './lib/issue-filter.mjs';
 import { postMessage as slackPostMessage } from './lib/slack-client.mjs';
 
+// ---------- Escalation routing ----------
+// The AI preamble (scripts/lib/auto-triage-preamble.js) tells Claude to write
+// "post in the #flex-support Slack channel..." for confirmed blockers. For
+// issues that belong to a specific team or workflow, we want managers
+// escalating to a different channel instead — but the preamble can't easily
+// branch on issue content, and we don't want to ask the LLM to do reliable
+// substring matching. So Claude always emits #flex-support and we rewrite
+// it here based on the rep's description.
+//
+// Add a route: append to ESCALATION_ROUTES. Order matters — first match wins.
+// Use word-boundary regexes (\b...\b) to avoid false positives like "robot"
+// matching a "bot" rule.
+const ESCALATION_DEFAULT_CHANNEL = '#flex-support';
+const ESCALATION_ROUTES = [
+  {
+    // Jamie/Jaime by name, or any standalone "bot/bots" mention. Routes to
+    // the OB Jaime bot test channel for issues that belong to that team's
+    // workflow (voicemail transfers, OB lead routing, bot-driven escalations).
+    match:   /\b(jamie|jaime|bots?)\b/i,
+    channel: '#ob-jaime-bot-test',
+    label:   'jamie-or-bot'
+  }
+];
+
+function escalationChannelFor(description) {
+  if (!description) return ESCALATION_DEFAULT_CHANNEL;
+  for (const route of ESCALATION_ROUTES) {
+    if (route.match.test(description)) return route.channel;
+  }
+  return ESCALATION_DEFAULT_CHANNEL;
+}
+
 // ---------- Config ----------
 // Auth: either SLACK_WEBHOOK_URL (preferred — works in workspaces that
 // require admin approval for bot-token apps), or SLACK_BOT_TOKEN +
@@ -266,14 +298,31 @@ async function processIssue({ issue, supabase, cfg }) {
     return { status: 'anthropic_failed' };
   }
 
-  // 3. Look up the team manager @mention (best-effort; never blocks the post).
+  // 3. Apply escalation-channel routing rules. Default escalation target is
+  // #flex-support (hardcoded into the AI preamble). For issues whose
+  // description matches a routing rule, swap the channel reference in the
+  // triage markdown to the team-specific channel. Doing this in JS rather
+  // than in the preamble keeps the routing deterministic — string matching
+  // is reliable in code, LLMs are not.
+  const escalationChannel = escalationChannelFor(issue.agent_description);
+  if (escalationChannel !== ESCALATION_DEFAULT_CHANNEL) {
+    // Negative lookahead `(?!-)` prevents mangling `#flex-support-help-bot`
+    // (the destination channel) if it ever appears in the triage text.
+    const before = triageMd;
+    triageMd = triageMd.replace(/#flex-support(?!-)/g, escalationChannel);
+    if (before !== triageMd) {
+      console.log(`[slack] ${issue.issue_id} routed escalation → ${escalationChannel}`);
+    }
+  }
+
+  // 4. Look up the team manager @mention (best-effort; never blocks the post).
   const { mention: teamManager, unmapped: unmappedTeamName } =
     await fetchTeamManagerMention(supabase, issue.team_name);
   if (unmappedTeamName) {
     console.log(`[slack] ${issue.issue_id} unmapped team: ${unmappedTeamName}`);
   }
 
-  // 4. Format + post to Slack.
+  // 5. Format + post to Slack.
   const managerMentions = teamManager ? [teamManager] : [];
   const text = buildSlackMessage(issue, triageMd, managerMentions, children.tasks);
   const mentionedIds = managerMentions.map((m) => m.slack_user_id);
