@@ -35,7 +35,13 @@ function getConfig() {
     supabaseUrl:        process.env.SUPABASE_URL,
     supabaseKey:        process.env.SUPABASE_SERVICE_ROLE_KEY,
     anthropicApiKey:    (process.env.ANTHROPIC_API_KEY || '').trim(),
-    anthropicModel:     process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+    // Sonnet 4.5 (Sept 2025). Replaces the original `claude-sonnet-4-20250514`
+    // snapshot, which Anthropic retired 2026-06-15 — keeping the old slug
+    // around silently killed this pipeline (404 not_found_error on every
+    // triage call, see processIssue's `anthropic_failed` path). Pin the date
+    // suffix so we get advance warning on the next deprecation cycle rather
+    // than auto-rolling onto a future model whose output we haven't reviewed.
+    anthropicModel:     process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20250929',
     anthropicMaxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '1200', 10),
     maxPerRun:          parseInt(process.env.MAX_SLACK_POSTS_PER_RUN || '25', 10),
     recencyHours:       parseInt(process.env.SLACK_RECENCY_HOURS || '24', 10),
@@ -95,7 +101,15 @@ async function main() {
         else                                            postsFailed  += 1;
       } catch (err) {
         postsFailed += 1;
-        console.error(`[slack] Unexpected error on ${issue.issue_id}:`, err?.message || err);
+        const errMsg = String(err?.message || err);
+        console.error(`[slack] Unexpected error on ${issue.issue_id}:`, errMsg);
+        // Systemic Anthropic failures (model retired, auth) hit every
+        // issue identically. Break the loop instead of grinding through
+        // 24 more identical 404s — the first one already told us.
+        if (errMsg.startsWith('Systemic Anthropic failure')) {
+          runError = errMsg;
+          break;
+        }
       }
     }
   } catch (err) {
@@ -116,6 +130,17 @@ async function main() {
   });
 
   console.log(`[slack] Done. found=${issuesFound} posted=${postsSent} skipped=${postsSkipped} failed=${postsFailed}`);
+
+  // Exit non-zero on systemic failures so the GitHub run goes red. The Slack
+  // step uses `if: always()` and is isolated from the sync step, so a red
+  // Slack step won't block the data sync or the email pipeline — it just
+  // surfaces the problem on the run summary, which is what we want.
+  // Issue-specific failures (postsFailed > 0 without runError) stay exit 0
+  // because a single bad triage shouldn't fail the whole batch.
+  if (runError) {
+    console.error(`::error::Slack pipeline aborted: ${runError}`);
+    process.exit(1);
+  }
 }
 
 // ---------- Fetchers ----------
@@ -214,6 +239,14 @@ async function processIssue({ issue, supabase, cfg }) {
     );
   } catch (err) {
     const msg = String(err?.message || err).slice(0, 500);
+    // ::error:: renders as a red annotation on the GitHub Actions run summary
+    // page. Without it, anthropic_failed is just a console.error buried in
+    // ~50 log lines — the run still shows conclusion=success because we
+    // catch per-issue and exit 0 to keep one bad triage from killing the
+    // batch. The annotation surfaces systemic failures (e.g. model
+    // deprecation 2026-06-15 silently killed every post for a week) without
+    // changing the exit-code contract.
+    console.error(`::error title=Slack triage failed (${issue.issue_id})::Anthropic: ${msg}`);
     console.error(`[slack] Anthropic failed ${issue.issue_id}: ${msg}`);
     await logPost(supabase, cfg, {
       ...auditBase,
@@ -224,6 +257,12 @@ async function processIssue({ issue, supabase, cfg }) {
       unmapped_team_name: null,
       error:              msg
     });
+    // Model deprecation / typo / 401 are systemic — they'll hit every issue.
+    // Bail out of the batch instead of grinding through 25 identical 404s.
+    // Surfaces as a single hard failure on the run, not 25 buried warnings.
+    if (isSystemicAnthropicError(msg)) {
+      throw new Error(`Systemic Anthropic failure, aborting batch: ${msg}`);
+    }
     return { status: 'anthropic_failed' };
   }
 
@@ -289,6 +328,26 @@ async function processIssue({ issue, supabase, cfg }) {
   });
   console.log(`[slack] POSTED ${issue.issue_id} → ts=${slackRes.ts || 'webhook'} mentions=${mentionedIds.length}`);
   return { status: 'posted' };
+}
+
+// Classifies an Anthropic error message as systemic (every issue will hit
+// this — no point continuing the batch) vs. issue-specific (transient,
+// content-related, safe to skip and continue).
+//
+// Conservative on purpose: we'd rather over-abort and surface the issue
+// to ops than churn through 25 doomed calls and hide the problem in
+// console.error noise. New deprecation patterns can be added here as
+// Anthropic introduces them.
+function isSystemicAnthropicError(msg) {
+  if (!msg) return false;
+  const s = String(msg).toLowerCase();
+  return (
+    s.includes('not_found_error') ||              // model retired / typo
+    s.includes('authentication') ||                // bad/missing API key
+    s.includes('permission_error') ||              // billing / org access
+    s.includes('invalid_api_key') ||
+    /\b40[13]\b/.test(s)                           // 401 / 403 across any framing
+  );
 }
 
 // ---------- Slack message formatter ----------

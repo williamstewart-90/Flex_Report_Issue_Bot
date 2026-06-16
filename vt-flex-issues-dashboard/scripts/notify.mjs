@@ -35,7 +35,8 @@ function getConfig() {
     gmailUser:           (process.env.GMAIL_USER || '').trim(),
     gmailAppPassword:    (process.env.GMAIL_APP_PASSWORD || '').trim(),
     anthropicApiKey:     (process.env.ANTHROPIC_API_KEY || '').trim(),
-    anthropicModel:      process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+    // See post-to-slack.mjs for the rationale on the version pin.
+    anthropicModel:      process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20250929',
     anthropicMaxTokens:  parseInt(process.env.ANTHROPIC_MAX_TOKENS || '1200', 10),
     maxPerRun:           parseInt(process.env.MAX_NOTIFICATIONS_PER_RUN || '25', 10),
     recencyHours:        parseInt(process.env.NOTIFICATIONS_RECENCY_HOURS || '24', 10)
