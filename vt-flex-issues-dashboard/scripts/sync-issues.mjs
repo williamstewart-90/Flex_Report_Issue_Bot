@@ -428,17 +428,31 @@ async function upsertIssues(rows) {
   if (error) throw new Error(`upsert vt_flex_issues: ${error.message}`);
 }
 
-async function replaceChildren(table, issueIds, rows) {
+// Idempotent child-row sync via upsert on the table's natural unique key.
+//
+// Previously used delete-then-insert ("truly replace") which races against
+// concurrent syncs: with two workers running the same script against this
+// Supabase (the personal repo + the team's jaredelizondo-ai/Flex_Issues_Reports_Bot1
+// repo, both scheduled), the deletes and inserts interleave and one run
+// blows up on the unique-key violation. Saw this 2026-06-16 20:12 UTC —
+// personal's sync hit "duplicate key value violates unique constraint
+// vt_flex_issue_supervisors_issue_id_supervisor_worker_sid_key" because
+// origin's sync had committed its inserts ~30s earlier in the same window.
+//
+// Trade-off: upsert never prunes. If the upstream API genuinely removes
+// a child (supervisor reassigned, queue dropped, etc.) the old row stays
+// in the DB. None of the current consumers care — the Slack pipeline keys
+// off team_name and the dashboard renders the full child set — and if
+// pruning becomes important later a periodic reconcile job can sweep
+// rows whose `synced_at` is older than the parent issue's. Worth it to
+// stop races from breaking sync for everyone downstream.
+async function upsertChildren(table, rows, conflictKey) {
   if (DRY_RUN) return;
-  if (!issueIds.length) return;
-  // wipe existing children for these issue_ids, then insert fresh.
-  // This keeps the child rows in sync if the API mutates them.
-  const { error: delErr } = await supabase
-    .from(table).delete().in('issue_id', issueIds);
-  if (delErr) throw new Error(`delete ${table}: ${delErr.message}`);
   if (!rows.length) return;
-  const { error: insErr } = await supabase.from(table).insert(rows);
-  if (insErr) throw new Error(`insert ${table}: ${insErr.message}`);
+  const { error } = await supabase
+    .from(table)
+    .upsert(rows, { onConflict: conflictKey });
+  if (error) throw new Error(`upsert ${table}: ${error.message}`);
 }
 
 async function recordRun(stats) {
@@ -469,12 +483,10 @@ async function main() {
       const historyRows     = [];
       const queueRows       = [];
       const skillRows       = [];
-      const issueIdsInBatch = [];
 
       for (const raw of issues) {
         const id = raw.issue_id;
         if (!id) continue;
-        issueIdsInBatch.push(id);
         const flat = flattenIssue(raw);
         issueRows.push(flat);
         if (MOCK_API) mockIssuesForNotify.push({ ...flat, __raw: raw });
@@ -536,11 +548,15 @@ async function main() {
       }
 
       await upsertIssues(issueRows);
-      await replaceChildren('vt_flex_issue_supervisors', issueIdsInBatch, supervisorRows);
-      await replaceChildren('vt_flex_recent_tasks',      issueIdsInBatch, taskRows);
-      await replaceChildren('vt_flex_status_history',    issueIdsInBatch, historyRows);
-      await replaceChildren('vt_flex_worker_queues',     issueIdsInBatch, queueRows);
-      await replaceChildren('vt_flex_worker_skills',     issueIdsInBatch, skillRows);
+      // onConflict keys mirror the UNIQUE constraints defined in
+      // supabase/migrations/001_initial_schema.sql. If you add a new unique
+      // index, add the matching string here or upsert will silently insert
+      // duplicates that the constraint will then reject.
+      await upsertChildren('vt_flex_issue_supervisors', supervisorRows, 'issue_id,supervisor_worker_sid');
+      await upsertChildren('vt_flex_recent_tasks',      taskRows,        'issue_id,task_order');
+      await upsertChildren('vt_flex_status_history',    historyRows,     'issue_id,status_order');
+      await upsertChildren('vt_flex_worker_queues',     queueRows,       'issue_id,queue_name');
+      await upsertChildren('vt_flex_worker_skills',     skillRows,       'issue_id,skill_name');
 
       issuesUpserted += issueRows.length;
       console.log(`Page ${pagesFetched}: upserted ${issueRows.length} issues (running total ${issuesUpserted})`);
