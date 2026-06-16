@@ -1,0 +1,29 @@
+-- Adds the missing (issue_id, task_order) uniqueness guard on
+-- vt_flex_recent_tasks. The other four child tables defined in
+-- 001_initial_schema.sql (vt_flex_issue_supervisors, vt_flex_status_history,
+-- vt_flex_worker_queues, vt_flex_worker_skills) all carry a UNIQUE constraint
+-- on (issue_id, <natural_key>); recent_tasks was the only one without.
+--
+-- Why: scripts/sync-issues.mjs uses
+--   .upsert(rows, { onConflict: 'issue_id,task_order' })
+-- to replace the racy delete-then-insert pattern (see commit 531b51d on the
+-- personal repo). Without this unique index Postgres rejects the ON CONFLICT
+-- clause with
+--   "there is no unique or exclusion constraint matching the ON CONFLICT
+--    specification"
+-- and every sync run aborts at page 1, 0 issues upserted (observed
+-- 2026-06-16 21:30 UTC, vt_flex_sync_runs).
+--
+-- Pre-check at deploy time:
+--   SELECT count(*) FROM (
+--     SELECT 1 FROM vt_flex_recent_tasks
+--     GROUP BY issue_id, task_order HAVING count(*) > 1
+--   ) d;
+-- returned 0 dupes / 0 NULL task_order over 3,150 rows, so this creates
+-- without prior dedup.
+--
+-- Index name mirrors Postgres's auto-naming convention for UNIQUE
+-- constraints so it sits alongside vt_flex_issue_supervisors_..._key,
+-- vt_flex_status_history_..._key, etc. in pg_indexes.
+CREATE UNIQUE INDEX IF NOT EXISTS vt_flex_recent_tasks_issue_id_task_order_key
+  ON vt_flex_recent_tasks (issue_id, task_order);
