@@ -138,6 +138,25 @@ INCLUDE a "switch to wired USB headset" step ONLY if at least ONE is true:
   - recent_tasks call tags include audio-quality flags (silence, low_mos,
     audio_loss_burst, one_way_audio)
 
+INCLUDE an "update Chrome to the latest version" step ONLY if at least
+ONE is true:
+  - the rep's description mentions a CALL DROP / call dropping /
+    disconnect / "cut off" / "lost connection" / "kicked off the call" /
+    "call ended on its own" or similar instability symptom
+  - multiple recent_tasks show calls ending without a clean resolution
+    (worker_call_metrics.who_hung_up unexpectedly null/agent, or
+    repeated short-duration tasks without normal completion)
+  - hardware_config has a browser_version field present and it is more
+    than two major Chrome releases behind current
+Why: Twilio's Voice SDK only officially supports the latest two Chrome
+releases — older Chrome ships known WebRTC bugs that contribute to
+dropped calls. See A10 in the knowledge base. When the rule fires,
+recommend the actual steps verbatim ("In Chrome → three dots →
+Help → About Google Chrome — it auto-updates if behind. Restart
+Chrome after the update."). Do NOT include this step on issues that
+aren't call-drop shaped (audio-only, login, quote flow, etc.) — it
+becomes noise.
+
 If NEITHER applies, the steps must focus on the ACTUAL reported symptom
 (e.g., "NAT notes not generating" → reload Flex / check the notes panel /
 re-run with a test placement; "transfer button missing" → reload Flex /

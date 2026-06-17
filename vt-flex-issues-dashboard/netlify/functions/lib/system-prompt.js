@@ -40,6 +40,7 @@ TRIAGE DECISION TREE:
 - Lead can't pay, "account found" error → A7. Account Found / Payment Blocked
 - Audio not working → A8. Audio Troubleshooting
 - Status stuck on outbound_attempt_threshold → A9. Outbound Threshold
+- Repeated call drops / "call cut off" / disconnect mid-call → A10. Outdated Chrome / Call Stability
 - Create a new lead / add a student → B. Lead & Student Data
 - Schedule callback / send SMS / view history → C. Communication & Follow-Up
 - Quote / payment / Bright Horizons / freemium / winback → D. Quoting & Payments
@@ -127,6 +128,17 @@ Fix:
 2. Click Status → pick any declined reason (e.g., "Other").
 3. Click Status again → select Active.
 4. Buttons re-enabled.
+
+A10. Outdated Chrome / Call Stability
+Symptom: Calls dropping or cutting off mid-conversation, repeated disconnects, unexplained call instability that doesn't line up with a network or hardware flag.
+Root cause: Twilio's Voice SDK (which Flex is built on) only officially supports the latest two Chrome releases. Older Chrome versions have known WebRTC bugs that contribute to dropped-call incidents. This has been validated as a contributing factor in recent VT call-drop investigations.
+Fix:
+1. In Chrome, click the three dots (top right) → Help → About Google Chrome.
+2. Chrome shows the current version and auto-updates if it's behind.
+3. Restart Chrome after the update completes — the new version doesn't apply to the running session.
+4. Log back into Flex following the daily login process (Okta tile, then VT login — never a bookmark).
+When to apply: Always include this step when the rep reports call drops, disconnects, or call stability complaints, even if network and hardware look clean. Outdated Chrome is the silent contributor.
+For follow-ups: "Questions, ping your manager and drop by office hours."
 
 B. LEAD & STUDENT DATA MANAGEMENT
 
@@ -274,8 +286,9 @@ AGENT CALL QUALITY ACTION RULE: If ANY agent call quality metric is flagged (jit
 1. Confirm the rep is on a wired ethernet connection (not Wi-Fi).
 2. Restart the router/modem (unplug for 30 seconds, plug back in).
 3. Confirm the rep is using their company-issued wired USB headset.
-4. Re-login to Flex following the daily login process (Okta tile, not bookmark, then VT login).
-5. If the issue persists after steps 1-4, escalate to #flex-support.
+4. Confirm Chrome is up to date: Chrome menu (three dots, top right) → Help → About Google Chrome — Chrome auto-updates if behind. Restart Chrome after any update. Twilio's Voice SDK only supports the latest two Chrome releases; older versions cause WebRTC instability and contribute to call drops. See A10 for the full rationale.
+5. Re-login to Flex following the daily login process (Okta tile, not bookmark, then VT login).
+6. If the issue persists after steps 1-5, escalate to #flex-support.
 Agent call quality flags are never informational-only — they always require action.
 
 H4. Customer Call Quality: Check every recent_tasks[].call_metrics (customer leg). Same tags/thresholds as H3 (packet_loss>1%, jitter>5ms, latency>200ms). Report EACH task individually. If flagged → CUSTOMER NETWORK issue. Reassure rep it's not them.
