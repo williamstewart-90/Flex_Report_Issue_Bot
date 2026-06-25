@@ -31,6 +31,23 @@ export const FILTER_RULES = [
       `\\b(routed|got|received|sent|transferr?ed)\\s+(?:\\w+\\s+){0,3}?(?:a\\s+|an\\s+|another\\s+|the\\s+)?PC\\b${PC_TECH_SYMPTOM_LOOKAHEAD}`,
       'i'
     ) },
+  // PC as the subject of a routing verb — "PC routed to me", "PC came in",
+  // "PC landed on my line", "PC dropped to me". Mirrors pc_routed_verb but
+  // inverted (PC before verb instead of verb before PC). Caught 2026-06-25
+  // when "PC routed to me that cost a CC90+" leaked through to Slack — every
+  // PC rule above assumed object-position PC. Same PC_TECH_SYMPTOM_LOOKAHEAD
+  // so "my PC rebooted" / "my PC froze" still flow through as real tech.
+  { name: 'pc_subject_verb', re: new RegExp(
+      `\\bPC\\s+(routed|came|landed|dropped|got|hit|went|ended\\s+up|fell|transferr?ed)\\b${PC_TECH_SYMPTOM_LOOKAHEAD}`,
+      'i'
+    ) },
+
+  // CC90 / CC-90 / CC 90 — VT's attribution/lead-credit tag. The term has a
+  // single domain meaning (sales attribution); whenever a rep mentions it,
+  // the issue is a routing/attribution complaint not a tech blocker. Blanket
+  // match is safe — there's no plausible hardware/audio context where
+  // "CC90" would appear in a rep's description.
+  { name: 'cc90_mention', re: /\bCC\s*-?\s*90\b/i },
 
   // Client Services / CS
   { name: 'client_services', re: /\bclient\s+services?\b/i },
