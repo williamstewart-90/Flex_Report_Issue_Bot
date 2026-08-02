@@ -15,6 +15,7 @@ const STARLINK_COHORT = new Set([
 
 const SORT_KEYS = [
   ['agent_name', 'Rep'],
+  ['manager_name', 'Manager'],
   ['calls', 'Calls'],
   ['tech_n', 'Tech'],
   ['tech_pct', 'Tech %'],
@@ -48,8 +49,20 @@ function aggregateRows(rows) {
     if (!name) continue;
     let cur = map.get(name);
     if (!cur) {
-      cur = { agent_name: name, calls: 0, tech_n: 0, ge15: 0, tech_ge15: 0 };
+      cur = {
+        agent_name: name,
+        manager_name: '',
+        managerCounts: new Map(),
+        calls: 0,
+        tech_n: 0,
+        ge15: 0,
+        tech_ge15: 0
+      };
       map.set(name, cur);
+    }
+    const mgr = (r.regional_director || '').trim();
+    if (mgr) {
+      cur.managerCounts.set(mgr, (cur.managerCounts.get(mgr) || 0) + 1);
     }
     const isTech = String(r.disconnect_label || '').toLowerCase().includes('technical');
     const ge15 = Number(r.call_duration_s) >= 900;
@@ -61,11 +74,26 @@ function aggregateRows(rows) {
     }
   }
 
-  return [...map.values()].map((r) => ({
-    ...r,
-    tech_pct: r.calls ? (100 * r.tech_n) / r.calls : null,
-    tech_ge15_pct: r.ge15 ? (100 * r.tech_ge15) / r.ge15 : null
-  }));
+  return [...map.values()].map((r) => {
+    let manager_name = '';
+    let best = 0;
+    for (const [mgr, n] of r.managerCounts) {
+      if (n > best) {
+        best = n;
+        manager_name = mgr;
+      }
+    }
+    return {
+      agent_name: r.agent_name,
+      manager_name,
+      calls: r.calls,
+      tech_n: r.tech_n,
+      ge15: r.ge15,
+      tech_ge15: r.tech_ge15,
+      tech_pct: r.calls ? (100 * r.tech_n) / r.calls : null,
+      tech_ge15_pct: r.ge15 ? (100 * r.tech_ge15) / r.ge15 : null
+    };
+  });
 }
 
 function summarize(rows) {
@@ -79,7 +107,8 @@ function summarize(rows) {
     tech_pct: calls ? (100 * tech_n) / calls : null,
     ge15,
     tech_ge15,
-    tech_ge15_pct: ge15 ? (100 * tech_ge15) / ge15 : null
+    tech_ge15_pct: ge15 ? (100 * tech_ge15) / ge15 : null,
+    reps: rows.length
   };
 }
 
@@ -90,12 +119,13 @@ function csvEscape(v) {
 
 function downloadCsv(rows, start, end) {
   const headers = [
-    'Rep', 'Calls', 'Tech', 'Tech %', '≥15m', '≥15m tech', '≥15m tech %'
+    'Rep', 'Manager', 'Calls', 'Tech', 'Tech %', '≥15m', '≥15m tech', '≥15m tech %'
   ];
   const lines = [headers.map(csvEscape).join(',')];
   for (const r of rows) {
     lines.push([
       csvEscape(r.agent_name),
+      csvEscape(r.manager_name),
       csvEscape(r.calls),
       csvEscape(r.tech_n),
       csvEscape(r.tech_pct == null ? '' : Number(r.tech_pct).toFixed(2)),
@@ -124,7 +154,9 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
+  const [repSearch, setRepSearch] = useState('');
+  const [managerFilter, setManagerFilter] = useState('all');
+  const [managerSearch, setManagerSearch] = useState('');
   const [sortKey, setSortKey] = useState('tech_ge15');
   const [sortDir, setSortDir] = useState('desc');
   const [hideZero, setHideZero] = useState(false);
@@ -135,7 +167,6 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
     setError(null);
     try {
       const startISO = new Date(`${start}T00:00:00`).toISOString();
-      // Inclusive end day → exclusive upper bound
       const endISO = addDays(new Date(`${end}T00:00:00`), 1).toISOString();
 
       const collected = [];
@@ -143,7 +174,7 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
       for (;;) {
         const { data, error: qErr } = await supabase
           .from('langfuse_call_scoring_new_sales')
-          .select('agent_name,call_duration_s,disconnect_label')
+          .select('agent_name,call_duration_s,disconnect_label,regional_director')
           .gte('called_at_utc', startISO)
           .lt('called_at_utc', endISO)
           .not('agent_name', 'is', null)
@@ -168,30 +199,57 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
     onLoadReady?.(() => load);
   }, [onLoadReady, load]);
 
-  // Load when the tab becomes active, or when the date range changes while active.
   useEffect(() => {
     if (!active) return;
     void load();
   }, [active, load]);
 
-  const totals = useMemo(() => summarize(rows), [rows]);
+  const companyTotals = useMemo(() => summarize(rows), [rows]);
 
-  const sorted = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  const managerOptions = useMemo(() => {
+    const set = new Set();
+    for (const r of rows) {
+      if (r.manager_name) set.add(r.manager_name);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    const rq = repSearch.trim().toLowerCase();
+    const mq = managerSearch.trim().toLowerCase();
     let list = rows;
-    if (q) {
-      list = list.filter((r) => r.agent_name.toLowerCase().includes(q));
+    if (rq) {
+      list = list.filter((r) => r.agent_name.toLowerCase().includes(rq));
+    }
+    if (managerFilter !== 'all') {
+      list = list.filter((r) => r.manager_name === managerFilter);
+    }
+    if (mq) {
+      list = list.filter((r) =>
+        (r.manager_name || '').toLowerCase().includes(mq)
+      );
     }
     if (hideZero) {
       list = list.filter((r) => r.tech_n > 0);
     }
-    const copy = [...list];
+    return list;
+  }, [rows, repSearch, managerFilter, managerSearch, hideZero]);
+
+  const filteredTotals = useMemo(() => summarize(filtered), [filtered]);
+  const filtersActive =
+    Boolean(repSearch.trim()) ||
+    managerFilter !== 'all' ||
+    Boolean(managerSearch.trim()) ||
+    hideZero;
+
+  const sorted = useMemo(() => {
+    const copy = [...filtered];
     copy.sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
       if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
+      if (av == null || av === '') return 1;
+      if (bv == null || bv === '') return -1;
       if (typeof av === 'string' && typeof bv === 'string') {
         return sortDir === 'asc'
           ? av.localeCompare(bv)
@@ -200,7 +258,7 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
       return sortDir === 'asc' ? Number(av) - Number(bv) : Number(bv) - Number(av);
     });
     return copy;
-  }, [rows, search, hideZero, sortKey, sortDir]);
+  }, [filtered, sortKey, sortDir]);
 
   function toggleSort(key) {
     if (sortKey === key) {
@@ -208,7 +266,14 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
       return;
     }
     setSortKey(key);
-    setSortDir(key === 'agent_name' ? 'asc' : 'desc');
+    setSortDir(key === 'agent_name' || key === 'manager_name' ? 'asc' : 'desc');
+  }
+
+  function clearFilters() {
+    setRepSearch('');
+    setManagerFilter('all');
+    setManagerSearch('');
+    setHideZero(false);
   }
 
   const rangeLabel = useMemo(() => {
@@ -229,20 +294,106 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
           Consumer new-sales Langfuse scoring (
           <code className="font-mono text-xs">langfuse_call_scoring_new_sales</code>
           ). Tech = <code className="font-mono text-xs">disconnect_label</code> matching{' '}
-          <code className="font-mono text-xs">technical%</code>. Scores land minutes after
-          calls; refresh to pull the latest.
+          <code className="font-mono text-xs">technical%</code>. Manager comes from{' '}
+          <code className="font-mono text-xs">regional_director</code> on the scored call.
         </p>
       </section>
 
-      <section className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Scored calls" value={totals.calls.toLocaleString()} />
-        <StatCard label="Tech disconnects" value={`${totals.tech_n.toLocaleString()} · ${fmtPct(totals.tech_pct)}`} />
-        <StatCard label="≥15m calls" value={totals.ge15.toLocaleString()} />
-        <StatCard
-          label="≥15m tech"
-          value={`${totals.tech_ge15.toLocaleString()} · ${fmtPct(totals.tech_ge15_pct)}`}
-          emphasize
-        />
+      <section className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+        <div className="xl:col-span-5 card p-4">
+          <div className="flex items-baseline justify-between gap-3 mb-3">
+            <h3 className="font-display text-xl">Whole company</h3>
+            <span className="label-tag">{rangeLabel}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard label="Reps" value={companyTotals.reps.toLocaleString()} compact />
+            <StatCard label="Scored calls" value={companyTotals.calls.toLocaleString()} compact />
+            <StatCard
+              label="Tech disconnects"
+              value={`${companyTotals.tech_n.toLocaleString()} · ${fmtPct(companyTotals.tech_pct)}`}
+              compact
+            />
+            <StatCard
+              label="≥15m tech"
+              value={`${companyTotals.tech_ge15.toLocaleString()} · ${fmtPct(companyTotals.tech_ge15_pct)}`}
+              emphasize
+              compact
+            />
+          </div>
+        </div>
+
+        <div className="xl:col-span-7 card p-4">
+          <div className="flex items-baseline justify-between gap-3 mb-3">
+            <h3 className="font-display text-xl">Filters</h3>
+            {filtersActive ? (
+              <button type="button" className="btn" onClick={clearFilters}>
+                Clear · show company
+              </button>
+            ) : (
+              <span className="label-tag">showing all reps</span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+            <div>
+              <label className="label-tag block mb-1">Rep name</label>
+              <input
+                type="text"
+                className="field"
+                placeholder="search rep…"
+                value={repSearch}
+                onChange={(e) => setRepSearch(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label-tag block mb-1">Manager</label>
+              <select
+                className="field"
+                value={managerFilter}
+                onChange={(e) => setManagerFilter(e.target.value)}
+              >
+                <option value="all">All managers</option>
+                {managerOptions.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label-tag block mb-1">Search manager</label>
+              <input
+                type="text"
+                className="field"
+                placeholder="type manager name…"
+                value={managerSearch}
+                onChange={(e) => setManagerSearch(e.target.value)}
+              />
+            </div>
+            <label className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-ink/70 pb-2">
+              <input
+                type="checkbox"
+                checked={hideZero}
+                onChange={(e) => setHideZero(e.target.checked)}
+              />
+              Hide zero tech
+            </label>
+          </div>
+          {filtersActive ? (
+            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 border-t border-ink/10 pt-4">
+              <StatCard label="Filtered reps" value={filteredTotals.reps.toLocaleString()} compact />
+              <StatCard label="Filtered calls" value={filteredTotals.calls.toLocaleString()} compact />
+              <StatCard
+                label="Filtered tech"
+                value={`${filteredTotals.tech_n.toLocaleString()} · ${fmtPct(filteredTotals.tech_pct)}`}
+                compact
+              />
+              <StatCard
+                label="Filtered ≥15m tech"
+                value={`${filteredTotals.tech_ge15.toLocaleString()} · ${fmtPct(filteredTotals.tech_ge15_pct)}`}
+                emphasize
+                compact
+              />
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <section className="mt-6 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
@@ -264,24 +415,7 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
             onChange={(e) => setEnd(e.target.value)}
           />
         </div>
-        <div className="md:col-span-2">
-          <label className="label-tag block mb-1">Search rep</label>
-          <input
-            type="text"
-            className="field"
-            placeholder="filter by name…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <label className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-ink/70 pb-2">
-          <input
-            type="checkbox"
-            checked={hideZero}
-            onChange={(e) => setHideZero(e.target.checked)}
-          />
-          Hide zero tech
-        </label>
+        <div className="md:col-span-3" />
         <button
           type="button"
           className="btn disabled:opacity-40"
@@ -295,13 +429,6 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
       {error && (
         <div className="mt-4 p-4 border-2 border-ember bg-ember/10 font-mono text-sm">
           <strong>Error:</strong> {error}
-          {/permission|rls|policy|42501/i.test(error) ? (
-            <p className="mt-2 text-ink/70">
-              Dashboard users may need SELECT on{' '}
-              <code>langfuse_call_scoring_new_sales</code>, or apply migration{' '}
-              <code>008_tech_disconnect_by_rep.sql</code> and switch this panel to the RPC.
-            </p>
-          ) : null}
         </div>
       )}
 
@@ -311,6 +438,7 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
             Per rep{' '}
             <span className="font-sans text-base text-ink/50 ml-2">
               {sorted.length}
+              {filtersActive ? ` of ${rows.length}` : ''}
               {loading ? ' · loading…' : ''}
             </span>
           </h3>
@@ -338,8 +466,8 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
             <tbody>
               {!loading && sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-ink/50 font-mono text-xs">
-                    No scored calls in this range
+                  <td colSpan={8} className="px-3 py-8 text-center text-ink/50 font-mono text-xs">
+                    No scored calls match these filters
                   </td>
                 </tr>
               ) : null}
@@ -352,6 +480,9 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
                         <span className="pill text-rust border-rust/30">starlink pilot</span>
                       ) : null}
                     </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-ink/80">
+                    {r.manager_name || '—'}
                   </td>
                   <td className="px-3 py-2.5 font-mono text-right tabular-nums">{r.calls}</td>
                   <td className="px-3 py-2.5 font-mono text-right tabular-nums">{r.tech_n}</td>
@@ -377,15 +508,20 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
             <strong>Technical disconnect:</strong> Langfuse{' '}
             <code className="font-mono text-xs">disconnect_label</code> contains{' '}
             <code className="font-mono text-xs">technical</code> (usually{' '}
-            <code className="font-mono text-xs">technical_disconnect</code>) — abrupt mid-call
-            drop, not a clean mutual hang-up.
+            <code className="font-mono text-xs">technical_disconnect</code>).
+          </li>
+          <li>
+            <strong>Manager:</strong> most common{' '}
+            <code className="font-mono text-xs">regional_director</code> on that
+            rep&apos;s scored calls in the selected range (same field as performance-dash
+            manager_name).
           </li>
           <li>
             <strong>≥15m:</strong> scored calls with duration ≥ 900 seconds.
           </li>
           <li>
-            Data refreshes as scoring lands (typically minutes after call end). This view
-            updates on load / Refresh.
+            Whole-company stats always cover the full date range. Filtered stats appear
+            when a rep/manager filter is active.
           </li>
         </ul>
       </footer>
@@ -393,13 +529,13 @@ export default function TechDisconnectPanel({ active = false, onLoadReady }) {
   );
 }
 
-function StatCard({ label, value, emphasize }) {
+function StatCard({ label, value, emphasize, compact }) {
   return (
-    <article className="card p-4">
+    <article className={compact ? '' : 'card p-4'}>
       <div className="label-tag">{label}</div>
       <div
         className={
-          'mt-2 font-display text-2xl leading-none ' +
+          (compact ? 'mt-1 font-display text-xl leading-none ' : 'mt-2 font-display text-2xl leading-none ') +
           (emphasize ? 'text-rust' : '')
         }
       >
