@@ -9,16 +9,19 @@ import IssueDetail from './components/IssueDetail.jsx';
 import IssuesByTeamChart from './components/IssuesByTeamChart.jsx';
 import IssuesOverTimeChart from './components/IssuesOverTimeChart.jsx';
 import FlexChatbot from './components/FlexChatbot.jsx';
+import TechDisconnectPanel from './components/TechDisconnectPanel.jsx';
 
 const TABS = [
-  { id: 'reports',  label: 'Issue Reports', icon: '📋' },
-  { id: 'helpbot',  label: 'Help Bot',      icon: '🛠️' }
+  { id: 'reports',   label: 'Issue Reports',     icon: '📋' },
+  { id: 'techdisc',  label: 'Tech Disconnects',  icon: '📉' },
+  { id: 'helpbot',   label: 'Help Bot',          icon: '🛠️' }
 ];
 
 export default function App({ session }) {
   const [activeTab, setActiveTab]         = useState('reports');
   const [lastSync, setLastSync]           = useState(null);
   const [refreshFn, setRefreshFn]         = useState(() => () => {});
+  const [techRefreshFn, setTechRefreshFn] = useState(() => () => {});
   const [chatbotPrefill, setChatbotPrefill] = useState(null);
 
   // Called from the Issue drawer's "Copy for Help Bot" button.
@@ -28,11 +31,16 @@ export default function App({ session }) {
     setActiveTab('helpbot');
   }
 
+  const headerRefresh =
+    activeTab === 'reports' ? refreshFn
+      : activeTab === 'techdisc' ? techRefreshFn
+        : null;
+
   return (
     <div className="min-h-screen">
       <Header
         lastSync={activeTab === 'reports' ? lastSync : null}
-        onRefresh={activeTab === 'reports' ? refreshFn : null}
+        onRefresh={headerRefresh}
         session={session}
       />
 
@@ -42,13 +50,19 @@ export default function App({ session }) {
         onChange={setActiveTab}
       />
 
-      {/* Both panels stay mounted; toggle visibility so chat history survives switches */}
+      {/* Panels stay mounted; toggle visibility so chat / table state survives switches */}
       <div className={activeTab === 'reports' ? 'block' : 'hidden'}>
         <Dashboard
           session={session}
           onLastSyncChange={setLastSync}
           onLoadReady={setRefreshFn}
           onSendToHelpBot={sendToHelpBot}
+        />
+      </div>
+      <div className={activeTab === 'techdisc' ? 'block' : 'hidden'}>
+        <TechDisconnectPanel
+          active={activeTab === 'techdisc'}
+          onLoadReady={setTechRefreshFn}
         />
       </div>
       <div className={activeTab === 'helpbot' ? 'block' : 'hidden'}>

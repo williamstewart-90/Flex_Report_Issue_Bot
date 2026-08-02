@@ -18,14 +18,22 @@ Pipeline + Netlify dashboard for the `/vt-flex/issues?issue_type=technical_issue
                                     │  - vt_flex_status…   │
                                     │  - vt_flex_worker_…  │
                                     │  - vt_flex_issue_su… │
+                                    │  - langfuse_call_…   │
                                     └─────────┬────────────┘
                                               │ anon-key reads
                                               ▼
                                     ┌──────────────────────┐
                                     │  Netlify (Vite SPA)  │
                                     │  React + Tailwind    │
+                                    │  tabs: Issues /      │
+                                    │  Tech Disconnects /  │
+                                    │  Help Bot            │
                                     └──────────────────────┘
 ```
+
+### Tech Disconnects tab
+
+Top-level tab (peer to Issue Reports). Reads `langfuse_call_scoring_new_sales`, aggregates per rep in the browser (paginated selects). Tech = `disconnect_label` matching `technical%`. Default range = last 14 days. Optional SQL RPC lives in `supabase/migrations/008_tech_disconnect_by_rep.sql` if you later want server-side aggregation.
 
 `console_output` is intentionally excluded per requirements. Everything else from the API is flattened into relational tables. The original payload (minus `console_output`) is also stored on `vt_flex_issues.raw_payload` (JSONB) for future-proofing.
 
