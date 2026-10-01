@@ -11,6 +11,11 @@ on:
     # GitHub Actions cron is UTC-only and "best effort" — real runs can
     # still drift 5-10 min during peak load on the runner.
     #
+    # Public-repo gotcha: GitHub auto-disables scheduled workflows after 60
+    # days with no repository activity (commits/pushes). Workflow runs alone
+    # do not count. Push any commit before that window closes to keep the
+    # cron alive; this file's history is a convenient place to do that.
+    #
     # Cost: 12 runs/hr * ~2 min * 12 hrs * 5 days * 4.3 wks ≈ 6,200 min/mo.
     # Free tier (private repo) is 2,000 min/mo — see README for plan notes.
     #
