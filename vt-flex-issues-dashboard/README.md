@@ -77,9 +77,7 @@ Add three repo secrets at `Settings → Secrets and variables → Actions`:
 - `SUPABASE_URL`             — `https://xtvesnascwiecohvkstd.supabase.co`
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (not anon)
 
-Trigger the first run from the **Actions** tab → `Sync VT Flex Issues` → Run workflow. The cron is set to **every 5 minutes, Mon–Fri, 12:00–23:55 UTC** (≈ 7 AM–7 PM Central). The cron string and other presets (24/7, tighter intervals, weekdays-only business hours) live in `.github/workflows/sync-issues.yml`.
-
-**GitHub Actions cost:** the current schedule burns ~6,200 min/month, which exceeds the free 2,000 min/month allowance for private personal repos. Plan options: tighten to weekdays 8 AM–5 PM only (`*/5 13-22 * * 1-5`, ~5K min/mo), drop back to hourly (~720 min/mo, free), or upgrade GitHub plan. See the comment block atop the workflow file for plug-in alternatives.
+Trigger the first run from the **Actions** tab → `Sync VT Flex Issues` → Run workflow. The cron is **hourly, every day, 11:00–23:37 UTC** (about 6 AM–6:30 PM Central). A `*/5` weekday cron was dropped by GitHub down to a few afternoon runs and never fired on weekends, so the dashboard went stale from Friday night until Monday. The cron strings live in `.github/workflows/sync-issues.yml`.
 
 ### 3. Netlify
 

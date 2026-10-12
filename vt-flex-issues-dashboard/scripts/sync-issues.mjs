@@ -13,9 +13,13 @@ const BEARER_TOKEN     = process.env.VT_FLEX_BEARER_TOKEN;
 const SUPABASE_URL     = process.env.SUPABASE_URL;
 const SUPABASE_KEY     = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const PAGE_LIMIT       = parseInt(process.env.VT_FLEX_PAGE_LIMIT || '100', 10);
-const MAX_PAGES        = parseInt(process.env.VT_FLEX_MAX_PAGES || '200', 10);
+// The API currently returns 25 rows/page regardless of limit. At ~1.7 new
+// pages/day, the old default of 200 was going to start truncating the tail
+// within days of Oct 2026 (the sync was already on page 193).
+const MAX_PAGES        = parseInt(process.env.VT_FLEX_MAX_PAGES || '2000', 10);
 const DRY_RUN          = process.env.DRY_RUN === '1' || process.env.DRY_RUN === 'true';
 const MOCK_API         = process.env.MOCK_API === '1' || process.env.MOCK_API === 'true';
+const FULL_SYNC        = process.env.VT_FLEX_FULL_SYNC === '1' || process.env.VT_FLEX_FULL_SYNC === 'true';
 
 function required(name, val) {
   if (!val) {
@@ -460,6 +464,77 @@ async function recordRun(stats) {
   await supabase.from('vt_flex_sync_runs').insert([stats]);
 }
 
+// Newest created_at already stored. Incremental runs stop once a newest-first
+// page is entirely at or behind this, instead of re-walking the full history
+// (193+ pages as of Oct 2026, which was pushing runs into the job timeout).
+// Monday's first slots walk the full history so updates to older issues
+// (status, call metrics) are not stuck behind the created_at watermark.
+// Other runs stay incremental. VT_FLEX_FULL_SYNC=0 disables the reconcile.
+function reconcileThisRun() {
+  if (process.env.VT_FLEX_FULL_SYNC === '0') return false;
+  if (FULL_SYNC) return true;
+  const now = new Date();
+  return now.getUTCDay() === 1 && now.getUTCHours() < 13;
+}
+
+async function latestCreatedAt() {
+  if (DRY_RUN || MOCK_API || reconcileThisRun()) return null;
+  const { data, error } = await supabase
+    .from('vt_flex_issues')
+    .select('issue_created_at')
+    .order('issue_created_at', { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn(`watermark lookup failed (${error.message}); scanning every page`);
+    return null;
+  }
+  const raw = data?.[0]?.issue_created_at;
+  const ms = raw ? Date.parse(raw) : NaN;
+  return Number.isNaN(ms) ? null : ms;
+}
+
+export function pageCreatedBounds(issues) {
+  let min = null;
+  let max = null;
+  let missing = false;
+  for (const raw of issues) {
+    const ms = Date.parse(raw?.created_at || '');
+    if (Number.isNaN(ms)) {
+      missing = true;
+      continue;
+    }
+    if (min === null || ms < min) min = ms;
+    if (max === null || ms > max) max = ms;
+  }
+  return { min, max, missing };
+}
+
+// newestFirst stays null until two pages have been compared. A later page
+// with a newer created_at latches it false for the rest of the run so we
+// never early-stop on an oldest-first or unsorted feed.
+export function observeOrder(state, bounds) {
+  if (state.newestFirst === false) {
+    return { newestFirst: false, prevMax: bounds.max ?? state.prevMax };
+  }
+  if (state.prevMax != null && bounds.max != null) {
+    if (bounds.max > state.prevMax) {
+      return { newestFirst: false, prevMax: bounds.max };
+    }
+    return { newestFirst: true, prevMax: bounds.max };
+  }
+  return { newestFirst: state.newestFirst, prevMax: bounds.max ?? state.prevMax };
+}
+
+export function pageIsCaughtUp(bounds, watermarkMs) {
+  if (watermarkMs == null) return false;
+  if (bounds.missing || bounds.max == null) return false;
+  return bounds.max <= watermarkMs;
+}
+
+function isoOrDash(ms) {
+  return ms == null ? '-' : new Date(ms).toISOString();
+}
+
 // ---------- main ----------
 async function main() {
   const startedAt = new Date().toISOString();
@@ -470,8 +545,21 @@ async function main() {
   // In MOCK_API mode, collect (flattened + raw) pairs so notify.mjs can
   // triage the fixture data without hitting Supabase. No effect in normal runs.
   const mockIssuesForNotify = [];
+  let watermarkMs = null;
+  let order = { newestFirst: null, prevMax: null };
+  let caughtUp = false;
 
   try {
+    if (reconcileThisRun()) {
+      console.log(FULL_SYNC
+        ? '[sync] VT_FLEX_FULL_SYNC=1 — walking every page'
+        : '[sync] Monday reconcile — walking every page');
+    } else {
+      watermarkMs = await latestCreatedAt();
+      if (watermarkMs == null) console.log('[sync] no watermark — walking every page');
+      else console.log(`[sync] incremental watermark ${new Date(watermarkMs).toISOString()}`);
+    }
+
     do {
       const data = MOCK_API ? mockPage(cursor) : await fetchPage(cursor);
       pagesFetched += 1;
@@ -559,14 +647,35 @@ async function main() {
       await upsertChildren('vt_flex_worker_skills',     skillRows,       'issue_id,skill_name');
 
       issuesUpserted += issueRows.length;
-      console.log(`Page ${pagesFetched}: upserted ${issueRows.length} issues (running total ${issuesUpserted})`);
+      const bounds = pageCreatedBounds(issues);
+      order = observeOrder(order, bounds);
+      console.log(
+        `Page ${pagesFetched}: upserted ${issueRows.length} issues ` +
+        `(running total ${issuesUpserted}) ` +
+        `created ${isoOrDash(bounds.min)}..${isoOrDash(bounds.max)}`
+      );
 
       cursor = data.next_cursor || null;
-      if (pagesFetched >= MAX_PAGES) {
-        console.warn(`Hit MAX_PAGES=${MAX_PAGES}, stopping.`);
+      if (
+        cursor &&
+        order.newestFirst === true &&
+        pageIsCaughtUp(bounds, watermarkMs)
+      ) {
+        caughtUp = true;
+        console.log(`Caught up at page ${pagesFetched}; not walking older pages`);
         break;
       }
+      if (cursor && pagesFetched >= MAX_PAGES) {
+        throw new Error(
+          `Hit MAX_PAGES=${MAX_PAGES} with more pages remaining. ` +
+          `Refusing to report success with a truncated sync.`
+        );
+      }
     } while (cursor);
+
+    if (!caughtUp && order.newestFirst === false && watermarkMs != null) {
+      console.log('[sync] feed is not newest-first; scanned every page');
+    }
 
     await recordRun({
       started_at: startedAt,
@@ -603,4 +712,4 @@ async function main() {
   }
 }
 
-main();
+if (process.env.SYNC_SKIP_MAIN !== '1') main();

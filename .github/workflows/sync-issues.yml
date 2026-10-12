@@ -2,29 +2,23 @@ name: Sync VT Flex Issues
 
 on:
   schedule:
-    # Every 5 minutes, 12:00-23:55 UTC, Monday-Friday.
-    # That's roughly 7 AM - 7 PM Central (CDT) / 6 AM - 6 PM Central (CST),
-    # M-F. Goal: cut the rep-submits-issue -> manager-gets-pinged latency
-    # from ~30-60 min (hourly cron + GH cron drift) down to 5-15 min during
-    # the hours managers are actually online.
+    # Hourly ticks, every day, 11:00-23:37 UTC (about 6 AM-6:30 PM Central
+    # during CDT, 5 AM-5:30 PM during CST). Not `*/5`.
     #
-    # GitHub Actions cron is UTC-only and "best effort" — real runs can
-    # still drift 5-10 min during peak load on the runner.
+    # GitHub drops high-frequency schedule slots instead of catching them up.
+    # On this public repo, `*/5 12-23 * * 1-5` fired about 3 times a day in
+    # October 2026, usually after 17:00 UTC, and never on Saturday or Sunday.
+    # The dashboard then showed an empty Fri-night-through-Monday-morning gap.
+    # Single-minute crons are delayed under load but are not dropped the way
+    # `*/5` is. :07 and :37 stay off the top of the hour, which is the busiest
+    # minute for Actions schedules.
     #
     # Public-repo gotcha: GitHub auto-disables scheduled workflows after 60
     # days with no repository activity (commits/pushes). Workflow runs alone
     # do not count. Push any commit before that window closes to keep the
     # cron alive; this file's history is a convenient place to do that.
-    #
-    # Cost: 12 runs/hr * ~2 min * 12 hrs * 5 days * 4.3 wks ≈ 6,200 min/mo.
-    # Free tier (private repo) is 2,000 min/mo — see README for plan notes.
-    #
-    # Tuning knobs:
-    #   '*/3 12-23 * * 1-5'    tighter ~3-min latency, ~10K min/mo
-    #   '*/5 11-2  * * *'      6 AM - 9 PM Central, every day, ~12K min/mo
-    #   '*/5 13-22 * * 1-5'    8 AM - 5 PM Central only, ~5K min/mo
-    #   '0 * * * *'            original hourly, ~720 min/mo (free-tier safe)
-    - cron: '*/5 12-23 * * 1-5'
+    - cron: '7 11,13,15,17,19,21,23 * * *'
+    - cron: '37 12,14,16,18,20,22 * * *'
   workflow_dispatch:    # Allow manual runs from the Actions tab
 
 concurrency:
@@ -34,7 +28,9 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Full history is ~200 pages and still growing. Incremental runs finish
+    # in a couple of pages; the Monday-morning reconcile walks everything.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
