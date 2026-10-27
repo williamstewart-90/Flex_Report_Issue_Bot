@@ -10,10 +10,12 @@ import IssuesByTeamChart from './components/IssuesByTeamChart.jsx';
 import IssuesOverTimeChart from './components/IssuesOverTimeChart.jsx';
 import FlexChatbot from './components/FlexChatbot.jsx';
 import TechDisconnectPanel from './components/TechDisconnectPanel.jsx';
+import HelpBotScorecardPanel from './components/HelpBotScorecardPanel.jsx';
 
 const TABS = [
   { id: 'reports',   label: 'Issue Reports',     icon: '📋' },
   { id: 'techdisc',  label: 'Tech Disconnects',  icon: '📉' },
+  { id: 'scorecard', label: 'Bot Scorecard',     icon: '📊' },
   { id: 'helpbot',   label: 'Help Bot',          icon: '🛠️' }
 ];
 
@@ -22,6 +24,7 @@ export default function App({ session }) {
   const [lastSync, setLastSync]           = useState(null);
   const [refreshFn, setRefreshFn]         = useState(() => () => {});
   const [techRefreshFn, setTechRefreshFn] = useState(() => () => {});
+  const [scorecardRefreshFn, setScorecardRefreshFn] = useState(() => () => {});
   const [chatbotPrefill, setChatbotPrefill] = useState(null);
 
   // Called from the Issue drawer's "Copy for Help Bot" button.
@@ -34,7 +37,8 @@ export default function App({ session }) {
   const headerRefresh =
     activeTab === 'reports' ? refreshFn
       : activeTab === 'techdisc' ? techRefreshFn
-        : null;
+        : activeTab === 'scorecard' ? scorecardRefreshFn
+          : null;
 
   return (
     <div className="min-h-screen">
@@ -63,6 +67,12 @@ export default function App({ session }) {
         <TechDisconnectPanel
           active={activeTab === 'techdisc'}
           onLoadReady={setTechRefreshFn}
+        />
+      </div>
+      <div className={activeTab === 'scorecard' ? 'block' : 'hidden'}>
+        <HelpBotScorecardPanel
+          active={activeTab === 'scorecard'}
+          onLoadReady={setScorecardRefreshFn}
         />
       </div>
       <div className={activeTab === 'helpbot' ? 'block' : 'hidden'}>
