@@ -7,6 +7,9 @@
 --   "Angela Damon", which is the lookup key.
 -- - Liz Weiss: inherited Aaron Bunch's reps starting 2026-09-16
 --   (Aaron moved to Senior Manager).
+-- - Elizabeth Berkley: now owns Miguel Morales's team. Flex still sends
+--   team_name "Miguel Morales", so that key is repointed to her; the
+--   "Elizabeth Berkley" key covers the rename once Flex catches up.
 --
 -- The old John Wright II / Aaron Bunch / Joshua Langford rows are left
 -- in place: no current issues carry those team names, so they never
@@ -18,8 +21,10 @@
 
 INSERT INTO vt_flex_slack_team_managers (team_name, slack_user_id, display_name, email)
 VALUES
-  ('Angela Damon', 'U01NF4NHSEL', 'Angie Damon', 'angela.damon@varsitytutors.com'),
-  ('Liz Weiss',    'U09C7NB29LK', 'Liz Weiss',   'liz.weiss@varsitytutors.com')
+  ('Angela Damon',      'U01NF4NHSEL', 'Angie Damon',       'angela.damon@varsitytutors.com'),
+  ('Liz Weiss',         'U09C7NB29LK', 'Liz Weiss',         'liz.weiss@varsitytutors.com'),
+  ('Miguel Morales',    'UG2JDAN7Q',   'Elizabeth Berkley', 'elizabeth.berkley@varsitytutors.com'),
+  ('Elizabeth Berkley', 'UG2JDAN7Q',   'Elizabeth Berkley', 'elizabeth.berkley@varsitytutors.com')
 ON CONFLICT (team_name) DO UPDATE
   SET slack_user_id = EXCLUDED.slack_user_id,
       display_name  = EXCLUDED.display_name,
