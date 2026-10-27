@@ -35,6 +35,10 @@ Pipeline + Netlify dashboard for the `/vt-flex/issues?issue_type=technical_issue
 
 Top-level tab (peer to Issue Reports). Reads `langfuse_call_scoring_new_sales`, aggregates per rep in the browser (paginated selects). Tech = `disconnect_label` matching `technical%`. Default range = last 14 days. Optional SQL RPC lives in `supabase/migrations/008_tech_disconnect_by_rep.sql` if you later want server-side aggregation.
 
+### Bot Scorecard tab
+
+Weekly health of the help bot, served by two allowlist-gated RPCs in `supabase/migrations/011_help_bot_scorecard.sql`: `vt_flex_help_bot_scorecard_weekly(p_weeks)` and `vt_flex_help_bot_scorecard_by_team(p_days)`. Tracks @mention coverage (target ≥95%), the share of issues filed within 24h of the same rep's previous one, issues per rep, Slack delivery, chatbot users, and emails sent. Teams marked "not mapped" are the seeding queue for `vt_flex_slack_team_managers`. Manager read/act rates aren't tracked yet; they need the Slack bot token so posts return a message ID.
+
 `console_output` is intentionally excluded per requirements. Everything else from the API is flattened into relational tables. The original payload (minus `console_output`) is also stored on `vt_flex_issues.raw_payload` (JSONB) for future-proofing.
 
 ## Tables
